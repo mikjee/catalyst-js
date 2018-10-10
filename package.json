@@ -2,7 +2,7 @@
   "name": "catalyst",
   "version": "0.1.0",
   "description": "Observable state store for Javascript.",
-  "main": "index.js",
+  "main": "catalyst.js",
   "scripts": {
     "test": "jest"
   },
