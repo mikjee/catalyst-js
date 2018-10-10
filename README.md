@@ -1,2 +1,2 @@
 # Catalyst
-Observable state store for Javascript
+Observable state-store for Javascript
