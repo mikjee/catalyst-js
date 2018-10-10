@@ -1,5 +1,5 @@
 {
-  "name": "catalyst",
+  "name": "catalyst-state-store",
   "version": "0.1.0",
   "description": "Observable state store for Javascript.",
   "main": "catalyst.js",
