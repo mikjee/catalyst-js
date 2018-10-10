@@ -1,0 +1,36 @@
+{
+  "name": "catalyst",
+  "version": "0.1.0",
+  "description": "Observable state store for Javascript.",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "author": "badguppy",
+  "license": "MIT",
+  "devDependencies": {
+    "babel-core": "^6.26.3",
+    "babel-loader": "^7.0.0",
+    "babel-plugin-transform-es2015-modules-commonjs": "^6.26.0",
+    "babel-preset-es2015": "^6.24.1",
+    "babel-preset-stage-0": "^6.24.1",
+    "jest": "^23.6.0",
+    "babel-jest": "^23.6.0"
+  },
+  "dependencies": {
+    "babel-loader": "^7.0.0",
+    "jest-cli": "^23.6.0"
+  },
+  "jest": {
+    "verbose": true,
+    "transform": {
+      "^.+\\.js$": "babel-jest"
+    },
+    "moduleFileExtensions": [
+      "js"
+    ],
+    "moduleDirectories": [
+      "node_modules"
+    ]
+  }
+}
