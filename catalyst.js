@@ -1,13 +1,29 @@
+"use strict";
+
 export default class Catalyst {
 
 	// ---------------------------
 	// CONSTRUCTOR
 	// ---------------------------
 
-	constructor(obj, history = [], historyCurrent = 0, historyFeed) {
+	constructor(obj, history = [], historyCurrent = 0, historyFeed, accessor = ".") {
+
+		// Check - cannot create store with array as base!
+		let objType = typeof obj;
+		if (objType != "undefined") {
+			if (Array.isArray(obj)) throw "Expected object, got array.";
+			else if (objType != "object") throw "Expected object, got value.";
+		}
 
 		// PREP
 		// ----
+
+		this.accessor = accessor;											// PUBLIC:
+		this.resolveMode = false;											// PRIVATE:
+		this.resolveContext = false;										// PRIVATE:
+		this.preserveReferences = true;										// PUBLIC:
+		this.preserveFragments = true;										// PUBLIC:
+		// TODO: test preserveReferences
 
 		// History - supports undo/redo, batched operations, aggregation!
 		this.history = history;												// PRIVATE:
@@ -23,12 +39,9 @@ export default class Catalyst {
 		this.batchStopper = this.stopBatch.bind(this);						// PRIVATE:
 		this.prunePending = false;											// PRIVATE:
 
-		// Interceptor - supports cascading changes to the store and are auto-batched to be atomic! They are not executed on undo/redo!
-		this.interceptors = {};												// PRIVATE:
-		this.intercepted = {prop: {}, child:{}, deep: {}};					// PRIVATE:
-		this.interceptorNotifier = this.notifyinterceptors.bind(this);		// PRIVATE:
-		this.setterLevel = 0;												// PRIVATE:
-		this.setterBatched = false;											// PRIVATE:
+		// Fragments - creates top-level-like state-chunks that preserve the reference to the main chunk.
+		this.fragmented = {};
+		this.fragments = {};
 
 		// Observer - does NOT support cascading changes to the store and can have side effects on history as they are called on undo-redo!
 		this.observers = {};												// PRIVATE:
@@ -38,8 +51,15 @@ export default class Catalyst {
 		this.observeDeferred = 0;											// PUBLIC: Whether observations are batched together!
 		this.observations = {												// PRIVATE:
 			stacks: [],		// Array of maps
-			exprs: {}		// exprs to stack index
+			paths: {}		// paths to stack index
 		};
+
+		// Interceptor - supports cascading changes to the store and are auto-batched to be atomic! They are not executed on undo/redo!
+		this.interceptors = {};												// PRIVATE:
+		this.intercepted = {prop: {}, child:{}, deep: {}};					// PRIVATE:
+		this.interceptorNotifier = this.notifyInterceptors.bind(this);		// PRIVATE:
+		this.setterLevel = 0;												// PRIVATE:
+		this.setterBatched = false;											// PRIVATE:
 
 		// STORE CREATION
 		// ----
@@ -47,7 +67,7 @@ export default class Catalyst {
 		// Proxify and create our store
 		this.root = {};
 		this.store = this.proxify(this.root, this, "", []);
-		// TODO: add __proto__ methods here ! 
+		// TODO: add __proto__ methods here !
 
 		// Add the user provided object to the store - one prop at a time!
 		this.stopRecord();
@@ -58,17 +78,25 @@ export default class Catalyst {
 		// ---
 
 		// Prep catalyst controllers
-		let getHistoryCurrent = () => this.historyCurrent,
+		let getAccessor = () => this.accessor,
+
+			getPreserveReferences = () => this.preserveReferences,
+			setPreserveReferences = value => this.preserveReferences = value,
+
+			getPreserveFragments = () => this.preserveFragments,
+			setPreserveFragments = value => this.preserveFragments = value,
+
+			getHistoryCurrent = () => this.historyCurrent,
 			setHistoryCurrent = index => (index >= this.historyCurrent ? (index == this.historyCurrent ? false : this.undo(index - this.historyCurrent)) : this.redo(this.historyCurrent - index)),
 
 			getHistoryLimit = () => this.historyLimit,
 			setHistoryLimit = limit => { this.historyLimit = limit; this.prune(); },
 
 			getHistory = () => this.history,
-			
+
 			getHistoryFeed = () => this.historyFeed,
 			setHistoryFeed = fn => this.historyFeed = fn,
-			
+
 			getHistoryDisabled = () => this.historyDisabled,
 			setHistoryDisabled = value => {
 				if (typeof value == "number") {
@@ -87,8 +115,8 @@ export default class Catalyst {
 					}
 					else if (value < this.historyBatched) {
 						if (value < 0) value = 0;
-						if (this.historyBatched > 0) 
-							while (this.historyBatched > value) 
+						if (this.historyBatched > 0)
+							while (this.historyBatched > value)
 								this.stopBatch();
 					}
 				}
@@ -96,8 +124,8 @@ export default class Catalyst {
 					if (!this.historyBatched) this.batch();
 				}
 				else {
-					if (this.historyBatched) 
-						while (this.historyBatched > 0) 
+					if (this.historyBatched)
+						while (this.historyBatched > 0)
 							this.stopBatch();
 				}
 			},
@@ -115,8 +143,8 @@ export default class Catalyst {
 					}
 					else if (value < this.observeDeffered) {
 						if (value < 0) value = 0;
-						if (this.observeDeffered > 0) 
-							while (this.observeDeffered > value) 
+						if (this.observeDeffered > 0)
+							while (this.observeDeffered > value)
 								this.resumeObservers();
 					}
 				}
@@ -124,13 +152,19 @@ export default class Catalyst {
 					if (!this.observeDeffered) this.deferObservers();
 				}
 				else {
-					if (this.observeDeffered) 
-						while (this.observeDeffered > 0) 
+					if (this.observeDeffered)
+						while (this.observeDeffered > 0)
 							this.resumeObservers();
 				}
 			},
 
-			getStore = () => this.store;
+			getStore = () => this.store,
+
+			getIsFragment = function(path) {
+				if (typeof path == "undefined") return 0;
+				else if (path.length == 0) return 0;
+				else return this.isFragment(path);
+			};
 
 		// TODO: write parsable comments on functions and purpose of variables - also mark if they are to be used by user or internal only!
 		// TODO: must have ability to add functions to the store! like ToJSON etc. Esp to areas not recorded ! - WONT work as it will stop recording due to use of JSON in history creation!
@@ -139,7 +173,15 @@ export default class Catalyst {
 		// TODO: ObserveAsync is not working - always sync!
 
 		// Access to controllers
-		let catalyst = {
+		this.catalyst = {
+
+			get accessor() { return getAccessor(); },
+
+			get preserveReferences() { return getPreserveReferences(); },
+			set preserveReferences(value) { setPreserveReferences(value); },
+
+			get preserveFragments() { return getPreserveFragments(); },
+			set preserveFragments(value) { setPreserveFragments(value); },
 
 			record: this.record.bind(this),
 			stopRecord: this.stopRecord.bind(this),
@@ -155,29 +197,38 @@ export default class Catalyst {
 			observeHistory: this.observeHistory.bind(this),
 			stopObserveHistory: this.stopObserveHistory.bind(this),
 
-			get history() { return getHistory(); },	
-								
+			get history() { return getHistory(); },
+
 			get historyCurrent() { return getHistoryCurrent(); },
 			set historyCurrent(index) { return setHistoryCurrent(index); },
 
 			get historyLimit() { return getHistoryLimit(); },
 			set historyLimit(limit) { setHistoryLimit(limit); },
-			
+
 			get historyFeed() { return getHistoryFeed(); },
 			set historyFeed(fn) { setHistoryFeed(fn); },
 
 			get isHistoryDisabled() { return getHistoryDisabled(); },
 			set isHistoryDisabled(value) { setHistoryDisabled(value); },
 
-			get isHistoryBatched() { return getHistoryBatched(); },		
+			get isHistoryBatched() { return getHistoryBatched(); },
 			set isHistoryBatched(value) { setHistoryBatched(value); },
 
-			get historyBatchModes() { return getHistoryBatchModes(); },		
-			
-			observe: this.observe.bind(this),
+			get historyBatchModes() { return getHistoryBatchModes(); },
+
+			parse: this.parse.bind(this),
+			parent: this.parent.bind(this),
+			fragment: this.metaProxify(this.fragment, this),
+			isFragment: this.metaProxify(getIsFragment, this),
+			get fragmentPath() { return ""; },
+			augment: this.metaProxify(this.augment, this),
+
+			observe: this.metaProxify(function (path, fn, children = false, deep = false, init = true)
+					{ return this.observe(path, fn, children, deep, init, this.catalyst); }, this),
 			stopObserve: this.stopObserve.bind(this),
 			deferObservers: this.deferObservers.bind(this),
 			resumeObservers: this.resumeObservers.bind(this),
+			refresh: this.metaProxify(this.refresh, this),
 
 			get isObserveAsync() { return getObserveAsync(); },
 			set isObserveAsync(value) { setObserveAsync(value); },
@@ -185,7 +236,8 @@ export default class Catalyst {
 			get isObserveDeferred() { return getObserveDeffered(); },
 			set isObserveDeferred(value) { setObserveDeffered(value); },
 
-			intercept: this.intercept.bind(this),
+			intercept: this.metaProxify(function (path, fn, children = false, deep = false)
+						{ return this.intercept(path, fn, children, deep, this.catalyst); }, this),
 			stopIntercept: this.stopIntercept.bind(this),
 
 			get store() { return getStore(); }
@@ -193,7 +245,7 @@ export default class Catalyst {
 		};
 
 		// All done - Return the catalyst
-		return catalyst;
+		return this.catalyst;
 
 	}
 
@@ -202,10 +254,10 @@ export default class Catalyst {
 	// ---------------------------
 
 	timestamp() {
-		
+
 		let timestamp = Date.now();
 
-		if (timestamp == this._timestamp) this._timestampCounter ++;		
+		if (timestamp == this._timestamp) this._timestampCounter ++;
 		else {
 			this._timestamp = timestamp;
 			this._timestampCounter = 1;
@@ -246,9 +298,9 @@ export default class Catalyst {
 		if (this.historyBatched > 0) {
 
 			// Are we stopping a batch op that aggregates but does not preserves order ?
-			if (this.historyBatchModes[this.historyBatched - 1].aggregate && 
-				(!this.historyBatchModes[this.historyBatched - 1].preserveOrder)) { 
-					
+			if (this.historyBatchModes[this.historyBatched - 1].aggregate &&
+				(!this.historyBatchModes[this.historyBatched - 1].preserveOrder)) {
+
 				// Prep
 				let map = this.historyBatchModes[this.historyBatched - 1].map;
 
@@ -274,7 +326,7 @@ export default class Catalyst {
 
 			}
 
-		}		
+		}
 
 		// Decrement counter
 		this.historyBatched --;
@@ -288,7 +340,7 @@ export default class Catalyst {
 			this.prunePending = true;
 			Promise.resolve(true).then(() => this.prune());
 		}
-		
+
 	}
 
 	logChange(str) {
@@ -317,13 +369,13 @@ export default class Catalyst {
 
 				// Preserve order
 				if (this.historyBatchModes[this.historyBatched - 1].preserveOrder) {
-					
+
 					// Prep
 					let tol = this.history[this.history.length - 1].changelog.length;
 
 					// Check if we are the first, both all-batched-wise and current-batchmode-wise
 					if ((tol > 0) && (this.historyBatchModes[this.historyBatched - 1].count > 0)) {
-					
+
 						// Split into prop and value
 						let newProp = str.slice(0, str.indexOf("=")),
 							lastProp = this.history[this.history.length - 1].changelog[tol - 1]
@@ -337,7 +389,7 @@ export default class Catalyst {
 
 						// Same prop - replace last changelog only if nothing has happened on it before - to represent the oldest undo state!
 						//else this.history[this.history.length - 1].changelog[tol - 1] = str; // WARNING! this is erroneous as undo op should be the initial state before the history begins !
-					
+
 					}
 
 					// We are the first  - direct add!
@@ -345,9 +397,9 @@ export default class Catalyst {
 						this.history[this.history.length - 1].changelog.push(str);
 						this.historyBatchModes[this.historyBatched - 1].count ++;
 					}
-				
-				} 
-				
+
+				}
+
 				// No order - Compress more
 				else {
 
@@ -374,12 +426,12 @@ export default class Catalyst {
 	}
 
 	undo(steps = 1, defer = true) {
-		
+
 		// Prep
 		let historyTarget = this.historyCurrent + steps;
 		let stepsCount = 0;
 		let timestamp = null;
-		
+
 		// Initial timestamp
 		if (this.history.length == this.historyCurrent) {
 			if (this.history.length > 0) timestamp = this.history[0].timestamp;
@@ -397,6 +449,10 @@ export default class Catalyst {
 		this.batchStarter = () => false;
 		this.batchStopper = () => false;
 
+		// Nullify fragment preservation
+		let preserveFragments = this.preserveFragments;
+		this.preserveFragments = false;
+
 		// Start observe defer mode
 		if (defer) this.deferObservers();
 
@@ -405,7 +461,7 @@ export default class Catalyst {
 
 			// Check if we have the next history
 			if (this.history.length - this.historyCurrent == 0) {
-				
+
 				// Request history feed
 				let feed = typeof this.historyFeed == "function" ? this.historyFeed(this.historyCurrent + 1, historyTarget, timestamp) : false;
 
@@ -436,10 +492,10 @@ export default class Catalyst {
 
 				// More prep
 				let pointer = this.store;
-				let levels = prop.split(".");
+				let levels = prop.split(this.accessor);
 				levels.shift();
 
-				// Traverse				
+				// Traverse
 				for (var levelIndex = 0; levelIndex < levels.length - 1; levelIndex ++) pointer = pointer[levels[levelIndex]];
 
 				// Install custom log utility
@@ -451,7 +507,7 @@ export default class Catalyst {
 
 				// Execute op
 				if (!value.length) delete pointer[levels[levels.length - 1]];
-				else pointer[levels[levels.length - 1]] = JSON.parse(value);			
+				else pointer[levels[levels.length - 1]] = JSON.parse(value);
 
 			}
 
@@ -470,17 +526,20 @@ export default class Catalyst {
 		// Stop Observe defer mode
 		if (defer) this.resumeObservers();
 
+		// Restore fragment preservation
+		this.preserveFragments = preserveFragments;
+
 		// Restore batch Ops starter and stopper
 		this.batchStarter = this.batch.bind(this);
 		this.batchStopper = this.stopBatch.bind(this);
 
 		// Restore intercept notifier
-		this.interceptorNotifier = this.notifyinterceptors.bind(this);
+		this.interceptorNotifier = this.notifyInterceptors.bind(this);
 
 		// Restore log utility to default
 		this.historyLogger = this.logChange.bind(this);
 
-		// All done - return the number of successful undone steps		
+		// All done - return the number of successful undone steps
 		return stepsCount;
 
 	}
@@ -489,14 +548,14 @@ export default class Catalyst {
 
 		// Sanity Check
 		if (this.historyCurrent == 0) return 0;
-		
+
 		// Prep
 		let historyTarget = this.historyCurrent - steps;
 		let stepsCount = 0;
 
 		// Validity reset
 		historyTarget = historyTarget < 0 ? 0 : historyTarget;
-		
+
 		// Install blank logger - don't mess up the history!
 		this.historyLogger = () => false;
 
@@ -506,6 +565,10 @@ export default class Catalyst {
 		// Install blank batch ops starter & stopper
 		this.batchStarter = () => false;
 		this.batchStopper = () => false;
+
+		// Nullify fragment preservation
+		let preserveFragments = this.preserveFragments;
+		this.preserveFragments = false;
 
 		// Start observe defer mode
 		if (defer) this.deferObservers();
@@ -529,15 +592,15 @@ export default class Catalyst {
 
 				// More prep
 				let pointer = this.store;
-				let levels = prop.split(".");
+				let levels = prop.split(this.accessor);
 				levels.shift();
 
-				// Traverse				
+				// Traverse
 				for (var levelIndex = 0; levelIndex < levels.length - 1; levelIndex ++) pointer = pointer[levels[levelIndex]];
 
 				// Execute op
 				if (!value.length) delete pointer[levels[levels.length - 1]];
-				else pointer[levels[levels.length - 1]] = JSON.parse(value);	
+				else pointer[levels[levels.length - 1]] = JSON.parse(value);
 
 			}
 
@@ -556,31 +619,34 @@ export default class Catalyst {
 		// Stop observe defer mode
 		if (defer) this.resumeObservers();
 
+		// Restore fragment preservation
+		this.preserveFragments = preserveFragments;
+
 		// Restore batch Ops starter and stopper
 		this.batchStarter = this.batch.bind(this);
 		this.batchStopper = this.stopBatch.bind(this);
 
 		// Restore intercept notifier
-		this.interceptorNotifier = this.notifyinterceptors.bind(this);
+		this.interceptorNotifier = this.notifyInterceptors.bind(this);
 
 		// Restore log utility to default
 		this.historyLogger = this.logChange.bind(this);
 
-		// All done - return the number of successful undone steps		
+		// All done - return the number of successful undone steps
 		return stepsCount;
 
 	}
 
 	commit() {
-		
+
 		if (this.historyCurrent > 0) {
-			for (var count = 0; count < this.historyCurrent; count ++) 
+			for (var count = 0; count < this.historyCurrent; count ++)
 				this.notifyHistoryObservers(this.history.pop(), "delete");
 			this.historyCurrent = 0;
 		}
 
 	}
-	
+
 	prune(keep) {
 
 		// Mark prune pending as over !
@@ -628,15 +694,256 @@ export default class Catalyst {
 	}
 
 	// ---------------------------
+	// FRAGMENTATION METHODS
+	// ---------------------------
+
+	parse(path) {
+
+		// Sanitize propertypath
+		if (!path.length) throw "Path is an empty string.";
+
+		// Prep levels
+		let levels = path.split(this.accessor);
+		if (path[0] == this.accessor) levels.shift();
+
+		// Get the final value, if can..
+		return levels.reduce((obj, prop) => {
+			if (typeof obj == "undefined") return obj;
+			if (prop.length == 0) return obj;
+			return obj[prop];
+		}, this.store);
+
+	}
+
+	parent(pathOrObject) {
+		if (typeof pathOrObject == "string") {
+
+			if (pathOrObject.length == 0) throw "Path is an empty string.";
+
+			let levels = pathOrObject.split(this.accessor);
+			if (pathOrObject[0] == this.accessor) levels.shift();
+			levels.pop();
+
+			return levels.reduce((obj, prop) => prop.length > 0 ? obj && obj[prop] : obj, this.store);
+		}
+
+		else if (typeof pathOrObject == "object") {
+			let path = this.resolve(pathOrObject, true).path;
+			return this.parent(path);
+		}
+
+		else throw ("Expected string or object, got " + (typeof pathOrObject) + ".");
+	}
+
+	isFragment(path) {
+
+		// Sanitize propertypath
+		if (!path.length) return 0;
+		if (path[0] != this.accessor) path = this.accessor + path;
+
+		// Return if fragment
+		return (typeof this.fragmented[path] == "object") ? Object.keys(this.fragmented[path]).length : 0;
+
+	}
+
+	fragment(path, onDissolve) {
+
+		// Sanitize propertypath
+		if (!path.length) throw "Path is an empty string.";
+		if (path[0] != this.accessor) path = this.accessor + path;
+
+		// Check if path exists and is an object
+		let store = this.parse(path);
+		if (typeof store != "object") throw "Path must be an existing valid part of the store (object or array).";
+
+		// Create ID
+		this._fragCounter = (this._fragCounter || 1) + 1;
+		let id = this._fragCounter;
+
+		// Populate new fragment
+		let internal = { observers: [], interceptors: [] };
+		let fragment = {
+
+			catalyst: this.catalyst,
+
+			stopObserve: this.stopObserve.bind(this),
+			stopIntercept: this.stopIntercept.bind(this),
+
+			get store() { return store; },
+			get fragmentPath() { return path; },
+			get fragmentId() { return id; }
+
+		};
+
+		// Helper
+		let normalize = _path => {
+			if (typeof _path != "string") return path;
+			else if (_path.length > 0) return path + (_path[0] == "." ? "" : ".") + _path;
+			else return path;
+		};
+
+		// Dissolver
+		let dissolve = function() {
+
+			// Check
+			if (!this.fragments.hasOwnProperty(id)) return false;
+
+			// Dissolution callback
+			if (typeof onDissolve == "function") onDissolve(fragment);
+
+			// Stop observers and interceptors installed through this fragment
+			internal.observers.forEach(id => this.stopObserve(id));
+			internal.interceptors.forEach(id => this.stopIntercept(id));
+
+			// Delete fragment methods
+			delete fragment.catalyst;
+			delete fragment.stopObserve;
+			delete fragment.stopIntercept;
+
+			delete fragment.parent;
+			delete fragment.parse;
+			delete fragment.isFragment;
+			delete fragment.fragment;
+			delete fragment.dissolve;
+			delete fragment.augment;
+			delete fragment.observe;
+			delete fragment.refresh;
+			delete fragment.intercept;
+
+			// Uninstall the fragment
+			delete this.fragmented[path][id];
+			delete this.fragments[id];
+
+			// Delete fragment properties
+			internal = undefined;
+			store = undefined;
+			path = undefined;
+			id = undefined;
+			onDissolve = undefined;
+
+			// All done
+			return true;
+
+		};
+
+		// Prep methods that use relative paths
+		let observe = function(_path, fn, children = false, deep = false, init = true) {
+			internal.observers.push(this.observe(normalize(_path), fn, children, deep, init, fragment));
+			return internal.observers[internal.observers.length - 1];
+		};
+
+		let refresh = function(pathOrObject) {
+			if (typeof pathOrObject == "undefined") return this.refresh(path);
+			else if (typeof pathOrObject == "string") return this.refresh(normalize(pathOrObject));
+			else return this.refresh(pathOrObject);
+		};
+
+		let intercept = function(_path, fn, children = false, deep = false) {
+			internal.interceptors.push(this.intercept(normalize(_path), fn, children, deep, fragment));
+			return internal.interceptors[internal.interceptors.length - 1];
+		};
+
+		let isFragment = function(_path) {
+			if (typeof _path == "undefined") return this.isFragment(path);
+			else if (_path.length == 0) return this.isFragment(path);
+			else return this.isFragment(normalize(_path));
+		};
+
+		let parent = function(pathOrObject) {
+			if (typeof pathOrObject == "undefined") return this.parent(path);
+			else if (typeof pathOrObject == "string") return this.parent(normalize(pathOrObject));
+			else return this.parent(pathOrObject);
+		};
+
+		let parse = function(_path) { return this.parse(normalize(_path)); };
+		let fragmentFn = function(_path, _onDissolve) { return this.fragment(normalize(_path), _onDissolve); };
+		let augment = function (_path) { return this.augment(normalize(_path)); }
+
+		// Assign the methods that use relative paths
+		fragment.isFragment = this.metaProxify(isFragment, this);
+		fragment.parent = parent.bind(this);
+		fragment.parse = parse.bind(this);
+		fragment.fragment = this.metaProxify(fragmentFn, this);
+		fragment.dissolve = dissolve.bind(this);
+		fragment.augment = this.metaProxify(augment, this);
+		fragment.observe = this.metaProxify(observe, this);
+		fragment.refresh = this.metaProxify(refresh, this);
+		fragment.intercept = this.metaProxify(intercept, this);
+
+		// Install the fragment
+		this.fragments[id] = fragment;
+		if (!this.fragmented[path]) this.fragmented[path] = {};
+		this.fragmented[path][id] = true;
+
+		// All done
+		return fragment;
+
+	}
+
+	augment(path) {
+
+		// Sanity
+		if (typeof path != "string") return false;
+		if (path.length == 0) return false;
+
+		// Is this path fragmented ?
+		if (typeof this.fragmented[path] != "object") return false;
+
+		// Do we have a positive number of fragments ?
+		let ids = Object.keys(this.fragmented[path]);
+		if (ids.length == 0) return false;
+
+		// Dissolve each fragment!
+		ids.forEach(id => this.fragments[id].dissolve());
+
+		// All done - calling dissolve will take care of removing the keys from fragments and fragmented object
+		return true;
+
+	}
+
+	// ---------------------------
 	// PROXY METHODS
 	// ---------------------------
 
-	proxify(target, self, expr, exprs) {
+	resolve(obj, getContext = false) {
+
+		this.resolveMode = true;
+		this.resolveContext = getContext;
+
+		let target = obj.anything;
+
+		this.resolveMode = false;
+		this.resolveContext = false;
+
+		return target;
+	}
+
+	// TODO: use resolveContext and decorators to create an alternative to metaProxify
+	metaProxify(targetFn, self) {
+
+		let adapterFn = function () {
+			return targetFn.apply(self, [this.path, ...arguments]);
+		};
+
+		let getter = function (target, prop, proxy) {
+			let env = { path: this.path + self.accessor + prop };
+			return new Proxy(adapterFn.bind(env), { get: getter.bind(env) });
+		};
+
+		return new Proxy(targetFn.bind(self), { get: getter.bind({path: ""}) });
+
+	}
+
+	proxify(target, self, path, paths) {
+
+		// Define context to be bound to.
+		let context = {self, path, paths};
 
 		// Create the list of handlers
 		let handlers = {
-			set: self.handleSet.bind({self, expr, exprs}),
-			deleteProperty: self.handleDelete.bind({self, expr, exprs})
+			get: self.handleGet.bind(context),
+			set: self.handleSet.bind(context),
+			deleteProperty: self.handleDelete.bind(context)
 		};
 
 		// Create & return the proxy
@@ -644,49 +951,113 @@ export default class Catalyst {
 
 	}
 
-	deepProxify(_value, _oldValue, _expr, _exprs, value, oldValue, expr, observations) {
-		
+	deepProxify(_value, _oldValue, _path, _paths, value, oldValue, path, misc, obsOldValue) {
+
 		// Diff check
 		if (_value == _oldValue) return _oldValue;
-		
+
 		// Prep
 		let _isObj = typeof _value == "object";
 		let _isOldObj = typeof _oldValue == "object";
-		
+
 		// No objects involved!
-		if (!_isOldObj && !_isObj) return _value;
-		
+		if (!_isOldObj && !_isObj) {
+			misc.changes ++;
+			return _value;
+		}
+
 		// Involves objects
 		else {
 
-			// Prep
-			let _isArr = _isObj && (typeof _value.push == "function"); // TODO: add array optimizations, check for length property ??
-			let root = _isArr ? [] : {};
+			// Array-type check
+			let _isArr = Array.isArray(_value);
+			let _isOldArr = Array.isArray(_oldValue);
+
+			// Fragmentation check
+			let isFragment = false;
+			if (_isOldObj) {
+				if (typeof this.fragmented[_path] == "object") {
+					if (Object.keys(this.fragmented[_path]).length > 0) isFragment = true;
+				}
+			}
+
+			// Preserve ref check
+			let preserveRef = this.preserveReferences || isFragment;
+
+			// Preserve fragments ?
+			if (isFragment && (!_isObj || (_isObj && (_isArr != _isOldArr)))) {
+				if (this.preserveFragments) return _oldValue;
+				else this.augment(_path);
+			}
+
+			// Prep Root - either the underlying target of object oldVal, or a new object if oldVal wasnt an object!
+			let root;
+			let preserve = _root => preserveRef ? this.resolve(_oldValue) : _root;
+
+			if (_isOldArr && _isArr) root = preserve([]); 			// a->a
+			else if (_isOldArr && _isObj) root = {}; 				// a->o
+			else if (_isObj && _isArr) root = []; 					// o->a
+			else if (_isOldObj && _isObj) root = preserve({}); 		// o->o
+			else if (_isOldArr) root = preserve([]);				// a->v
+			else if (_isArr) root = [];								// v->a
+			else if (_isOldObj) root = preserve({}); 				// o->v
+			else if (_isObj) root = {}; 							// v->o
+
+			let isRootArr = Array.isArray(root);
+
+			// Prep deletion optimization - defers/avoids actually deleting the keys until until/unless necessary
+			let deferDeletes = _isOldObj && !_isObj;
+			let deletes = [];
+
+			let deferDelete = key => {
+				if (preserveRef) {
+					if (!deferDeletes) delete root[key];
+					else deletes.push(key);
+				}
+				misc.changes ++;
+			};
+
+			let executeDeletes = () => {
+				if (!deferDeletes) return;
+				else deferDeletes = false;
+				deletes.forEach(key => delete root[key]);
+				deletes = [];
+			};
 
 			// Define object/array key processor
 			let processKey = key => {
 
 				// Prep	values
-				let newVal = typeof _value == "object" ? _value[key] : undefined;
-				let oldVal = typeof _oldValue == "object" ? _oldValue[key] : undefined;
+				let newVal = _isObj ? _value[key] : undefined;
+				let oldVal = _isOldObj ? _oldValue[key] : undefined;
+				let isOldValObj = typeof oldVal == "object";
+				let obsOldVal = _isOldObj ? obsOldValue[key] : undefined;
 
-				// Diff check
+				// Diff
 				if (newVal == oldVal) {
-					root[key] = oldVal;
+					if (!preserveRef) root[key] = oldVal;
 					return;
 				}
 
-				// Prep expr
-				let __expr = _expr + "." + key;
-				let __exprs = _exprs.slice();
-				__exprs.push(_expr);
+				// Prep path - optionally optimize by retreiving from context if oldValue is an object.
+				let __path, __paths;
+				if (_isOldObj && isOldValObj) {
+					let context = this.resolve(oldVal, true);
+					__path = context.path;
+					__paths = context.paths;
+				}
+				else {
+					__path = _path + this.accessor + key;
+					__paths = _paths.slice();
+					__paths.push(_path);
+				}
 
 				// Intercept!
-				newVal = this.interceptorNotifier(__expr, undefined, undefined, newVal, oldVal, expr, value, oldValue, true, true);
+				newVal = this.interceptorNotifier(__path, undefined, undefined, newVal, oldVal, path, value, true, true);
 
-				// No diff - it remains oldValue!
+				// Diff again!
 				if (newVal == oldVal) {
-					root[key] = oldVal;
+					if (!preserveRef) root[key] = oldVal;
 					return;
 				}
 
@@ -694,16 +1065,28 @@ export default class Catalyst {
 				else {
 
 					// newValue is object, this property wont get deleted but updated - must recursively proxify this!
-					if (typeof newVal == "object") root[key] = this.deepProxify(newVal, oldVal, __expr, __exprs, value, oldValue, expr, observations);
-					
+					if (typeof newVal == "object") {
+						root[key] = this.deepProxify(newVal, oldVal, __path, __paths, value, oldValue, path, misc, obsOldVal);
+						if (!isOldValObj) misc.changes ++;
+						executeDeletes();
+					}
+
 					// newVal is undefined - this subtree is to be deleted
 					else if (typeof newVal == "undefined") {
 
 						// if oldVal was an object, must recurse into subtrees to get unanimity!
-						if (typeof oldVal == "object") {
-							let remnant = this.deepProxify(undefined, oldVal, __expr, __exprs, value, oldValue, expr, observations);
-							if (typeof remnant != "undefined") root[key] = remnant;
+						if (isOldValObj) {
+							let remnant = this.deepProxify(undefined, oldVal, __path, __paths, value, oldValue, path, misc, obsOldVal);
+
+							if (typeof remnant != "undefined") {
+								root[key] = remnant;
+								executeDeletes();
+							}
+							else deferDelete(key);
 						}
+
+						// Oldval was a value, Delete it!
+						else deferDelete(key);
 
 					}
 
@@ -711,66 +1094,124 @@ export default class Catalyst {
 					else {
 
 						// if oldVal was an object, must recurse into subtrees to get unanimity!
-						if (typeof oldVal == "object") {
-							let remnant = this.deepProxify(undefined, oldVal, __expr, __exprs, value, oldValue, expr, observations);
-							if (typeof remnant == "undefined") root[key] = newVal;
-							else root[key] = remnant;
+						if (isOldValObj) {
+							let remnant = this.deepProxify(undefined, oldVal, __path, __paths, value, oldValue, path, misc, obsOldVal);
+
+							if (typeof remnant != "undefined") root[key] = remnant;
+							else {
+								root[key] = newVal;
+								misc.changes ++;
+							}
 						}
 
 						// Oldval was a value, straight assign new value!
-						else root[key] = newVal;
+						else {
+							root[key] = newVal;
+							misc.changes ++;
+						}
+
+						// Stop deferring deletes
+						executeDeletes();
 
 					}
 
 					// Note observation
-					observations.push({expr: __expr, exprc: _expr, exprs: _exprs, oldVal: oldVal, propOnly: true});
+					// TODO: can paths fill in for pathc ? everywhere? Is pathc at all required anywhere? is it not part of oaths ??
+					misc.observations.push({path: __path, oldVal: obsOldVal, propOnly: true});
 
 				}
 
 			};
 
-			// Each new/existing property (loop over newValue)
-			if (_isObj) {
-				for(var key in _value) processKey(key);
-			}
+			// Hold all the keys
+			let keys = {};
+			//let indexes = []; // TODO: implement this below !
 
-			// Each new/existing property (loop over newValue)
-			if (_isOldObj) {
-				for(var key in _oldValue) {
-					if (_isObj) {
-						if (typeof _value[key] == "undefined") processKey(key);
-					}						
-					else processKey(key);
+			// Each new/old property (loop over newValue & oldValue)
+			if (_isOldObj) for(var key in _oldValue) keys[key] = true;
+			if (_isObj) for(var key in _value) keys[key] = true;
+
+			// Process each key
+			for (var key in keys) processKey(key);
+
+			// Helper - Disconnects old object so that any ops on it do not trigger side effects !
+			let disconnect = () => {
+				let context = this.resolve(_oldValue, true);
+				context.passthrough = true;
+			};
+
+			// Helper - proxifies root if oldValue was not an object (root is a new object)
+			let proxifyOldValue = () => {
+
+				// Fix root array length - trim empty items from the end of the array !!!
+				if (isRootArr && _isArr && _isOldArr && preserveRef) {
+					let h = 0;
+					root.forEach((_,i) => h = (i > h) ? i : h);
+					root.length = h + 1;
 				}
-			}
+
+				// Return old or new !
+				if (_isOldObj && (_isOldArr == _isArr) && preserveRef) return _oldValue;
+				else {
+					if (_isOldObj) disconnect();
+					return this.proxify(root, this, _path, _paths);
+				}
+
+			};
 
 			// anything->object will always return object!
-			if (_isObj) return this.proxify(root, this, _expr, _exprs);
+			if (_isObj) return proxifyOldValue();
 
 			// object->value can return value or object!
 			else {
-				if (Object.keys(root).length > 0) return this.proxify(root, this, _expr, _exprs);
-				else return _value;
+				if (Object.keys(root).length - deletes.length > 0) return proxifyOldValue();
+				else {
+					if (typeof _value != "object" && _isOldObj) disconnect();
+					return _value;
+				}
 			}
-			
+
 		}
 
 	}
 
 	handleSet(target, prop, value, proxy) {
 
+		// TODO: test setting part of store to another part of same store !
+
+		// Check if this is an isolated non-state disconnected reference!
+		if (this.passthrough == true) {
+			target[prop] = value;
+			return true;
+		}
+
 		// Check diff
 		if (target[prop] == value) return true;
-		
+
 		// Prep
 		let self = this.self;
-		let expr = this.expr + "." + prop;
-		let exprs = this.exprs.slice();
-		exprs.push(expr);
+		let historyStr;
+		let obsOldValue;
 
 		let oldValue = target[prop];
 		let oldType = typeof oldValue;
-		let observations = [];
+		let misc = {
+			observations: [],
+			changes: 0
+		};
+
+		// Prep path - optionally optimize by retreiving from context if oldValue is an object.
+		let path, paths;
+		if (oldType == "object") {
+			let context = self.resolve(oldValue, true);
+			path = context.path;
+			paths = context.paths;
+		}
+		else {
+			path = this.path + self.accessor + prop;
+			paths = this.paths.slice();
+			paths.push(this.path);
+		}
 
 		// Cascading changes via intercepters must be batched!
 		self.setterLevel ++;
@@ -793,9 +1234,9 @@ export default class Catalyst {
 		};
 
 		// Fire interceptors
-		try { value = self.interceptorNotifier(expr, this.expr, this.exprs, value, oldValue, expr, value, oldValue); }
+		try { value = self.interceptorNotifier(path, this.path, this.paths, value, oldValue, path, value); }
 		catch (e) {
-			console.error("Discard update (" + expr + ") - encountered error!", e);
+			console.error("Discard update (" + path + ") - encountered error!", e);
 			exitRoutine();
 			return false;
 		}
@@ -806,40 +1247,66 @@ export default class Catalyst {
 			return true;
 		}
 
-		// Set the new value - recursively if an object!
+		// Set the new value!
 		try {
-			 
-			let result = self.deepProxify(value, oldValue, expr, exprs, value, oldValue, expr, observations); 
 
+			// Prep old JSON string - if we are gonna record history OR we are doing o -> o
+			let oldJSON;
+			if ((oldType == "object") || (!self.historyDisabled)) oldJSON = JSON.stringify(oldValue);
+
+			// Prep history string - moved here as o->o does not create new object, and hence old state would be missed !
+			if (!self.historyDisabled) {
+				historyStr = path + "=";
+				if (oldType != "undefined") historyStr = historyStr + oldJSON;
+			}
+
+			// Note obsOldValue
+			if (oldType == "object") obsOldValue = JSON.parse(oldJSON);
+			else obsOldValue = oldValue;
+
+			// Deep proxify
+			let result = self.deepProxify(value, oldValue, path, paths, value, oldValue, path, misc, obsOldValue);
+
+			// Has anything been updated?
 			if (result == oldValue) {
-				exitRoutine();
-				return true;
+
+				// In case of o -> o, we check hasChanged, if no changes are found we exit.
+				if (typeof result == "object") {
+					if (misc.changes == 0) {
+						exitRoutine();
+						return true;
+					}
+					else {}
+				}
+
+				// for everything else, it means nothing changed!
+				else {
+					exitRoutine();
+					return true;
+				}
+
 			}
 			else if (typeof result == "undefined") delete target[prop];
 			else target[prop] = result;
 
-		} 
-		catch(e) { 
-			console.error("Discard update (" + expr + ") - encountered error!", e);
+		}
+		catch(e) {
+			console.error("Discard update (" + path + ") - encountered error!", e);
 			exitRoutine();
 			return false;
 		}
 
 		// Record History
-		if (!self.historyDisabled) {
-			let historyStr = expr + "=";
-			if (oldType != "undefined") historyStr = historyStr + JSON.stringify(oldValue);
-			self.historyLogger(historyStr);
-		}
+		if (!self.historyDisabled) self.historyLogger(historyStr);
 
 		// Stop batched interception?
 		exitRoutine();
 
 		// Add top-level observation
-		observations.push({ expr: expr, exprc: this.expr, exprs: this.exprs, oldVal: oldValue, propOnly: false });
+		misc.observations.push({ path: path, pathc: this.path, paths: this.paths, oldVal: obsOldValue, propOnly: false });
 
 		// Fire observers
-		let fn = () => observations.forEach(obs => self.observerNotifier(obs.expr, obs.exprc, obs.exprs, obs.oldVal, expr, oldValue, obs.propOnly));
+		let fn = () => misc.observations.forEach(obs => self.observerNotifier(obs.path, obs.pathc, obs.paths, obs.oldVal, path, obsOldValue, obs.propOnly));
 		if (this.observeAsync) Promise.resolve().then(fn);
 		else fn();
 
@@ -851,60 +1318,61 @@ export default class Catalyst {
 	handleDelete(target, prop, proxy) {
 
 		// Redirect to Set handler
-		return (this.self.handleSet.bind(this))(target, prop, undefined, proxy);		
+		return (this.self.handleSet.bind(this))(target, prop, undefined, proxy);
 
+	}
+
+	handleGet(target, prop) {
+		if (!this.self.resolveMode) return target[prop];
+		else {
+			if (this.self.resolveContext) return this;
+			else return target;
+		}
 	}
 
 	// ---------------------------
 	// OBSERVER METHODS
 	// ---------------------------
 
-	observe(expr, fn, children = false, deep = false, init = true) {
+	// TODO: add ability to pass object and not path!
+	observe(path, fn, children = false, deep = false, init = true, origin) {
 
 		// Sanitize propertypath
-		if (!expr.length) return false;
-		if (expr[0] != ".") expr = "." + expr;
+		if (!path.length) return false;
+		if (path[0] != this.accessor) path = this.accessor + path;
+
+		// Prep origin
+		origin = origin || this.catalyst;
 
 		// Create ID
 		this._obsCounter = (this._obsCounter || 1) + 1;
-		let id = this._obsCounter;	
+		let id = this._obsCounter;
 
 		// Helper
-		let addObserver = (_expr, type) => {
-			if (!this.observed[type][_expr]) this.observed[type][_expr] = new Map();			
-			this.observed[type][_expr].set(id, true);
+		let addObserver = (_path, type) => {
+			if (!this.observed[type][_path]) this.observed[type][_path] = new Map();
+			this.observed[type][_path].set(id, true);
 		};
 
 		// Map observer id to path & object
-		this.observers[id] = {expr, fn, children: children || deep, deep};
+		this.observers[id] = {path, fn, children: children || deep, deep, origin};
 
 		// Observe prop
-		addObserver(expr, "prop");
+		addObserver(path, "prop");
 
 		// Observe children
-		if (children || deep) addObserver(expr, "child");
+		if (children || deep) addObserver(path, "child");
 
 		// Observe deep
-		if (deep) {
-
-			let _expr = "";
-			let levels = expr.split(".");
-			levels.shift();
-			
-			for (var count = 0; count < levels.length; count ++) {
-				_expr = _expr + "." + levels[count];
-				addObserver(_expr, "deep");
-			}
-
-		}
+		if (deep) addObserver(path, "deep");
 
 		// Fire the observer once to initialize?
 		if (init) {
-			let obsFn = () => fn(expr, undefined, expr, undefined);
+			let obsFn = () => fn(path.substr(origin.fragmentPath.length), undefined, path, undefined);
 			if (this.observeAsync) Promise.resolve(true).then(obsFn);
 			else obsFn();
 		}
-		
+
 		// Done
 		return id;
 	}
@@ -912,26 +1380,26 @@ export default class Catalyst {
 	stopObserve(id) {
 
 		if (this.observers.hasOwnProperty(id)) {
-			
+
 			// Retreive
-			let prop = this.observers[id].expr;
-			
+			let prop = this.observers[id].path;
+
 			// Delete props, child observation Maps
 			this.observed["prop"][prop].delete(id);
-			if (this.observed["child"][prop])	
-				if (this.observed["child"][prop].has(id)) 
+			if (this.observed["child"][prop])
+				if (this.observed["child"][prop].has(id))
 					this.observed["child"][prop].delete(id);
 
 			// Delete deep observers
-			let _expr = "";
-			let levels = prop.split(".");
+			let _path = "";
+			let levels = prop.split(this.accessor);
 			levels.shift();
 			for (var count = 0; count < levels.length; count ++) {
-				_expr = _expr + "." + levels[count];
-				
-				if (this.observed["deep"][_expr])
-					if (this.observed["deep"][_expr].has(id)) 
-						this.observed["deep"][_expr].delete(id);
+				_path = _path + this.accessor + levels[count];
+
+				if (this.observed["deep"][_path])
+					if (this.observed["deep"][_path].has(id))
+						this.observed["deep"][_path].delete(id);
 			}
 
 			// Delete the actual thing
@@ -946,45 +1414,45 @@ export default class Catalyst {
 
 	}
 
-	notifyObservers(expr, exprc, exprs, oldVal, expr_, oldVal_, propOnly = false, overrideDefer = false) {
+	notifyObservers(path, pathc, paths, oldVal, path_, oldVal_, propOnly = false, overrideDefer = false) {
 
 		// Are we deferining ? - If yes then save this to the topmost deferred stack!
 		if ((this.observeDeferred > 0) && !overrideDefer) {
 
-			// If the expr already exists in an observation, update that observation! NOTE: propOnly minimizes the scope of the observers selected, hence it is AND-ed!
-			let stackIndex = this.observations.exprs[expr];
+			// If the path already exists in an observation, update that observation! NOTE: propOnly minimizes the scope of the observers selected, hence it is AND-ed!
+			let stackIndex = this.observations.paths[path];
 			if (typeof stackIndex != "undefined") {
-				
-				// get the old obs
-				let obs = this.observations.stacks[stackIndex].get(expr);
-				
-				// Delete the old ops from it's stack
-				this.observations.stacks[stackIndex].delete(expr)
 
-				// Update the expr to point to the current stack!
-				this.observations.exprs[expr] = this.observeDeferred - 1;
+				// get the old obs
+				let obs = this.observations.stacks[stackIndex].get(path);
+
+				// Delete the old ops from it's stack
+				this.observations.stacks[stackIndex].delete(path)
+
+				// Update the path to point to the current stack!
+				this.observations.paths[path] = this.observeDeferred - 1;
 
 				// Put the new ops in the current stack!
-				this.observations.stacks[this.observeDeferred - 1].set(expr, {
-					expr, 
-					exprc, 
-					exprs,
-					oldVal: obs.oldVal, 
-					expr_,
-					oldVal_, 
+				this.observations.stacks[this.observeDeferred - 1].set(path, {
+					path,
+					pathc,
+					paths,
+					oldVal: obs.oldVal,
+					path_,
+					oldVal_,
 					propOnly: obs.propOnly && propOnly
 				});
-				
+
 			}
 
-			// Expr is not already observed!
+			// Path is not already observed!
 			else {
 
-				// Add new expr pointing to the current stack!
-				this.observations.exprs[expr] = this.observeDeferred - 1;
+				// Add new path pointing to the current stack!
+				this.observations.paths[path] = this.observeDeferred - 1;
 
-				// Add the observation to the current stack	
-				this.observations.stacks[this.observeDeferred - 1].set(expr, {expr, exprc, exprs, oldVal, expr_, oldVal_, propOnly});
+				// Add the observation to the current stack
+				this.observations.stacks[this.observeDeferred - 1].set(path, {path, pathc, paths, oldVal, path_, oldVal_, propOnly});
 
 			}
 
@@ -993,24 +1461,38 @@ export default class Catalyst {
 		// Not deferring or defer overriden!
 		else {
 
+			// Helper
+			let notify = id => {
+
+				let observer = this.observers[id];
+				observer.fn(
+					path.substr(observer.origin.fragmentPath.length),
+					oldVal,
+					observer.origin,
+					path_,
+					oldVal_
+				);
+
+			};
+
 			// Notify Observers - Prop
-			if (this.observed["prop"][expr]) 
-				for (var id of this.observed["prop"][expr].keys()) 
-					this.observers[id].fn(expr, oldVal, expr_, oldVal_);
+			if (this.observed["prop"][path])
+				for (var id of this.observed["prop"][path].keys())
+					notify(id);
 
 			// Notify child and deep observers?
 			if (!propOnly) {
 
 				// Notify Observers - Child
-				if (this.observed["child"][exprc]) 
-					for (var id of this.observed["child"][exprc].keys()) 
-						this.observers[id].fn(expr, oldVal, expr_, oldVal_);
+				if (this.observed["child"][pathc])
+					for (var id of this.observed["child"][pathc].keys())
+						notify(id);
 
 				// Notify Observers - Deep
-				for (var count = exprs.length - 2; count >= 0; count --)
-					if (this.observed["deep"][exprs[count]])
-						for (var id of this.observed["deep"][exprs[count]].keys()) 
-							this.observers[id].fn(expr, oldVal, expr_, oldVal_);
+				for (var count = paths.length - 1; count >= 0; count --)
+					if (this.observed["deep"][paths[count]])
+						for (var id of this.observed["deep"][paths[count]].keys())
+							notify(id);
 
 			}
 
@@ -1038,25 +1520,25 @@ export default class Catalyst {
 
 		// Fire observations - in order of addition!
 		let fn = () => {
-			
+
 			// Prep
 			let arr = [];
 			let stackIndex = all ? 0 : this.observeDeferred;
 
-			// For each stack 
+			// For each stack
 			while (stackIndex <= this.observeDeferred) {
 
 				// Publish
 				this.observations.stacks[stackIndex].forEach(obs => {
-					delete this.observations.exprs[obs.expr];
+					delete this.observations.paths[obs.path];
 					this.observerNotifier(
-						obs.expr, 
-						obs.exprc, 
-						obs.exprs, 
-						obs.oldVal, 
-						obs.expr_, 
-						obs.oldVal_, 
-						obs.propOnly, 
+						obs.path,
+						obs.pathc,
+						obs.paths,
+						obs.oldVal,
+						obs.path_,
+						obs.oldVal_,
+						obs.propOnly,
 						true
 					);
 				});
@@ -1065,7 +1547,7 @@ export default class Catalyst {
 				stackIndex ++;
 
 			}
-			
+
 			// Update stack
 			if (all) this.observations.stacks = [];
 			else this.observations.stacks.pop();
@@ -1078,49 +1560,88 @@ export default class Catalyst {
 
 	}
 
+	refresh(pathOrObject) {
+
+		// Declare path and it's variants
+		let path, pathc, paths;
+
+		// Sanitize and try extract the path variants
+		if (typeof pathOrObject == "string") {
+
+			if (pathOrObject.length == 0) throw "Path is an empty string";
+			if (pathOrObject[0] != this.accessor) pathOrObject = this.accessor + pathOrObject;
+
+			let obj = this.parse(pathOrObject);
+			if (typeof obj == "object") return this.refresh(obj);
+
+			path = pathOrObject;
+
+			let levels = pathOrObject.split(this.accessor);
+			if (pathOrObject[0] == this.accessor) levels.shift();
+
+			levels.pop();
+			pathc = this.accessor + levels.join(this.accessor);
+
+			levels.pop();
+			let _levels = [];
+			levels = levels.forEach((level, index) => {
+				_levels.push((index == 0 ? "" : _levels[index - 1]) + this.accessor + level);
+			});
+			paths = _levels;
+
+		}
+
+		else if (typeof pathOrObject == "object") {
+			let context = this.resolve(pathOrObject, true);
+			let context2 = this.resolve(this.parent(pathOrObject), true);
+
+			path = context.path;
+			pathc = context2.path;
+			paths = context2.paths;
+		}
+
+		else throw ("Expected path (string) or state reference (object), got " + (typeof pathOrObject) + ".");
+
+		// Invoke all observers for the path
+		this.observerNotifier(path, pathc, paths, undefined, path, undefined, false, true);
+
+	}
+
 	// ---------------------------
 	// INTERCEPTOR METHODS
 	// ---------------------------
 
-	intercept(expr, fn, children = false, deep = false) {
+	intercept(path, fn, children = false, deep = false, origin) {
 
 		// Sanitize propertypath
-		if (!expr.length) return false;
-		if (expr[0] != ".") expr = "." + expr;
+		if (!path.length) return false;
+		if (path[0] != this.accessor) path = this.accessor + path;
+
+		// Prep origin
+		origin = origin || this.catalyst;
 
 		// Create ID
 		this._iceptCounter = (this._iceptCounter || 1) + 1;
-		let id = this._iceptCounter;	
+		let id = this._iceptCounter;
 
 		// Helper
-		let addinterceptor = (_expr, type) => {
-			if (!this.intercepted[type][_expr]) this.intercepted[type][_expr] = new Map();			
-			this.intercepted[type][_expr].set(id, true);
+		let addInterceptor = (_path, type) => {
+			if (!this.intercepted[type][_path]) this.intercepted[type][_path] = new Map();
+			this.intercepted[type][_path].set(id, true);
 		};
 
-		// Map observer id to path & object
-		this.interceptors[id] = {expr, fn, children: children || deep, deep};
+		// Map interceptor id to path & object
+		this.interceptors[id] = {path, fn, children: children || deep, deep, origin};
 
-		// Observe prop
-		addinterceptor(expr, "prop");
+		// Intercept prop
+		addInterceptor(path, "prop");
 
-		// Observe children
-		if (children || deep) addinterceptor(expr, "child");
+		// Intercept children
+		if (children || deep) addInterceptor(path, "child");
 
-		// Observe deep
-		if (deep) {
+		// Intercept deep
+		if (deep) addInterceptor(path, "deep");
 
-			let _expr = "";
-			let levels = expr.split(".");
-			levels.shift();
-			
-			for (var count = 0; count < levels.length; count ++) {
-				_expr = _expr + "." + levels[count];
-				addinterceptor(_expr, "deep");
-			}
-
-		}
-		
 		// Done
 		return id;
 	}
@@ -1128,26 +1649,26 @@ export default class Catalyst {
 	stopIntercept(id) {
 
 		if (this.interceptors.hasOwnProperty(id)) {
-			
+
 			// Retreive
-			let prop = this.interceptors[id].expr;
-			
-			// Delete props, child observation Maps
+			let prop = this.interceptors[id].path;
+
+			// Delete props, child interception Maps
 			this.intercepted["prop"][prop].delete(id);
-			if (this.intercepted["child"][prop])	
-				if (this.intercepted["child"][prop].has(id)) 
+			if (this.intercepted["child"][prop])
+				if (this.intercepted["child"][prop].has(id))
 					this.intercepted["child"][prop].delete(id);
 
-			// Delete deep observers
-			let _expr = "";
-			let levels = prop.split(".");
+			// Delete deep interceptors
+			let _path = "";
+			let levels = prop.split(this.accessor);
 			levels.shift();
 			for (var count = 0; count < levels.length; count ++) {
-				_expr = _expr + "." + levels[count];
+				_path = _path + this.accessor + levels[count];
 
-				if (this.intercepted["deep"][_expr])
-					if (this.intercepted["deep"][_expr].has(id)) 
-						this.intercepted["deep"][_expr].delete(id);
+				if (this.intercepted["deep"][_path])
+					if (this.intercepted["deep"][_path].has(id))
+						this.intercepted["deep"][_path].delete(id);
 			}
 
 			// Delete the actual thing
@@ -1162,45 +1683,50 @@ export default class Catalyst {
 
 	}
 
-	notifyinterceptors(expr, exprc, exprs, newVal, oldVal, expr_, newVal_, oldVal_, propOnly = false, requireDiff = true) {
+	notifyInterceptors(path, pathc, paths, newVal, oldVal, path_, newVal_, propOnly = false, requireDiff = true) {
+
+		// Helper
+		let notify = id => {
+
+			let interceptor = this.interceptors[id];
+			return interceptor.fn(
+				path.substr(interceptor.origin.fragmentPath.length),
+				newVal,
+				interceptor.origin,
+				path_,
+				newVal_
+			);
+
+		};
 
 		// Do we execute parent and grand-parent interceptors ??
 		if (!propOnly) {
 
-			// Fire interceptors - deep			
-			for(var count = 0; count < exprs.length - 1; count++) {
-				if ( this.intercepted["deep"][exprs[count]]) {			
-					for (var id of this.intercepted["deep"][exprs[count]].keys()) {
-						newVal = this.interceptors[id].fn(expr, newVal, oldVal, expr_, newVal_, oldVal_);
-						
-						if (requireDiff) {
-							if (newVal == oldVal) return newVal;
-						}
+			// Fire interceptors - deep
+			for(var count = 0; count <= paths.length - 1; count++) {
+				if ( this.intercepted["deep"][paths[count]]) {
+					for (var id of this.intercepted["deep"][paths[count]].keys()) {
+						newVal = notify(id);
+						if ((requireDiff) && (newVal == oldVal)) return newVal;
 					}
 				}
 			}
 
 			// Fire interceptors - child
-			if (this.intercepted["child"][exprc]) {
-				for (var id of this.intercepted["child"][exprc].keys()) {
-					newVal = this.interceptors[id].fn(expr, newVal, oldVal, expr_, newVal_, oldVal_);
-					
-					if (requireDiff) {
-						if (newVal == oldVal) return newVal;
-					}
+			if (this.intercepted["child"][pathc]) {
+				for (var id of this.intercepted["child"][pathc].keys()) {
+					newVal = notify(id);
+					if ((requireDiff) && (newVal == oldVal)) return newVal;
 				}
 			}
 
 		}
 
 		// Fire interceptor - prop
-		if (this.intercepted["prop"][expr]) {
-			for (var id of this.intercepted["prop"][expr].keys()) {
-				newVal = this.interceptors[id].fn(expr, newVal, oldVal, expr_, newVal_, oldVal_);
-				
-				if (requireDiff) {
-					if (newVal == oldVal) return newVal;
-				}
+		if (this.intercepted["prop"][path]) {
+			for (var id of this.intercepted["prop"][path].keys()) {
+				newVal = notify(id);
+				if ((requireDiff) && (newVal == oldVal)) return newVal;
 			}
 		}
 
