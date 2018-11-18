@@ -1,3 +1,6 @@
+build/
 catalyst.test.js
 package-lock.json
 node_modules/
+docs/
+.babelrc
