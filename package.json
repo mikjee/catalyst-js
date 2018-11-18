@@ -1,15 +1,15 @@
 {
-  "name": "catalyst-state-store",
-  "version": "0.2.1",
+  "name": "catalyst-js",
+  "version": "0.1.1",
   "description": "Observable state store for Javascript.",
   "repository": {
     "type": "git",
-    "url": "git://github.com/badguppy/Catalyst.git"
+    "url": "git://github.com/badguppy/catalyst-js.git"
   },
   "main": "catalyst.js",
   "scripts": {
     "test": "jest",
-	"build": "uglifyjs ./catalyst.js -o ./build/catalyst.min.js -c -m"
+    "build": "uglifyjs ./catalyst.js -o ./build/catalyst.min.js -c -m"
   },
   "author": "badguppy",
   "license": "MIT",
@@ -21,8 +21,8 @@
     "babel-preset-stage-0": "^6.24.1",
     "jest": "^23.6.0",
     "babel-jest": "^23.6.0",
-	"uglify-es": "^3.3.9",
-	"jest-cli": "^23.6.0"
+    "uglify-es": "^3.3.9",
+    "jest-cli": "^23.6.0"
   },
   "jest": {
     "verbose": true,
