@@ -1,6 +1,6 @@
 {
-  "name": "catalyst-state-store",
-  "version": "0.2.1",
+  "name": "catalyst-js",
+  "version": "0.1.0",
   "description": "Observable state store for Javascript.",
   "repository": {
     "type": "git",
