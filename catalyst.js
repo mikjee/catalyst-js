@@ -6,6 +6,16 @@ export default class Catalyst {
 	// CONSTRUCTOR
 	// ---------------------------
 
+	/**
+	* Creates a new state store.
+	* @constructor
+	* @param {Object} obj - The base object to create the store from.
+	* @param {Object[]} history - Array of history steps, recent to oldest. Obtained by historyObservers.
+	* @param {number} historyCurrent - The current state of the store relative to history steps. Most recent is 0.
+	* @callback historyFeed - Function called when Catalyst runs out of undoable steps - to be fed older history.
+	* @param {char} accessor - Character to be used as separation/ accessor in nested property paths.
+	* @returns {Object} The state store.
+	*/
 	constructor(obj, history = [], historyCurrent = 0, historyFeed, accessor = ".") {
 
 		// Check - cannot create store with array as base!
@@ -264,15 +274,26 @@ export default class Catalyst {
 		return timestamp.toString() + (("00" + this._timestampCounter).slice(-3));
 	}
 
+	/**
+	* Resumes history recording. Stackable.
+	*/
 	record() {
 		this.historyDisabled --;
 		if (this.historyDisabled < 0) this.historyDisabled = 0;
 	}
 
+	/**
+	* Stops history recording. Stackable. WARNING! Can cause side-effects in history recording.
+	*/
 	stopRecord() {
 		this.historyDisabled ++;
 	}
 
+	/**
+	* Starts combining multiple history records into a single atomic step. Stackable.
+	* @param {boolean} aggregate - Combine updates to the same property into a single update.
+	* @param {boolean} history - Preserve order of updates to different properties. Effective only when aggregate is true.
+	*/
 	batch(aggregate = false, preserveOrder = true) {
 
 		// If this is the first batch switch, add a new history array to hold all the batched ops.
@@ -284,6 +305,9 @@ export default class Catalyst {
 
 	}
 
+	/**
+	* Stops batching and marks the beginning of a new history step. Stackable.
+	*/
 	stopBatch() {
 
 		// Notify flag
@@ -423,6 +447,12 @@ export default class Catalyst {
 
 	}
 
+	/**
+	* Restores store to previously recorded state. Does not invoke interceptors. Will dissolve fragments and break references where necessary.
+	* @param {number} steps - The number of history records to undo.
+	* @param {boolean} defer - If true, notifies observers AFTER undoing the given number of steps. If false, notifies observers WHILE undoing.
+	* @returns {number} The number of steps that were successfully undone.
+	*/
 	undo(steps = 1, defer = true) {
 
 		// Prep
@@ -542,6 +572,12 @@ export default class Catalyst {
 
 	}
 
+	/**
+	* Restores store to previously updated state. Does not invoke interceptors. Will dissolve fragments and break references where necessary.
+	* @param {number} steps - The number of history records to redo.
+	* @param {boolean} defer - If true, notifies observers AFTER redoing the given number of steps. If false, notifies observers WHILE redoing.
+	* @returns {number} The number of steps that were successfully redone.
+	*/
 	redo(steps = 1, defer = true) {
 
 		// Sanity Check
@@ -635,6 +671,9 @@ export default class Catalyst {
 
 	}
 
+	/**
+	* Destroys redoable steps from after current state. Also automatically called if updates are made to the store when current state is not the most recent.
+	*/
 	commit() {
 
 		if (this.historyCurrent > 0) {
@@ -645,6 +684,11 @@ export default class Catalyst {
 
 	}
 
+	/**
+	* Removes undoable steps from memory, for optimization purposes.
+	* @param {number} keep - The number of history records to keep, starting from most recent. If keep is less than currentHistory, currentHistory will be used instead.
+	* @returns {Object[]} The history records that were removed from memory.
+	*/
 	prune(keep) {
 
 		// Mark prune pending as over !
@@ -670,12 +714,22 @@ export default class Catalyst {
 
 	}
 
+	/**
+	* Registers a callback to be invoked when a history record is created/updated/deleted.
+	* @callback fn - The function to be used as the callback.
+	* @returns {number} An ID that can be used to unregister the callback.
+	*/
 	observeHistory(fn) {
 		let id = this.timestamp();
 		this.historyObservers[id] = fn;
 		return id;
 	}
 
+	/**
+	* Unregisters observeHistory callback.
+	* @param {number} id - The ID that was returned on registering the callback.
+	* @returns {boolean} Whether the callback was successfully unregistered.
+	*/
 	stopObserveHistory(id) {
 		if (this.historyObservers.hasOwnProperty(id)) {
 			delete this.historyObservers[id];
@@ -695,6 +749,11 @@ export default class Catalyst {
 	// FRAGMENTATION METHODS
 	// ---------------------------
 
+	/**
+	* Parses a nested property path string, and returns the part of the store that it represents.
+	* @param {string} path - The path containing the properties, separated by the accessor character.
+	* @returns {*} The part of the store represented by the path.
+	*/
 	parse(path) {
 
 		// Sanitize propertypath
@@ -713,6 +772,11 @@ export default class Catalyst {
 
 	}
 
+	/**
+	* Takes a part of the store and returns the path of the object relative to the base store.
+	* @param {Object} obj - An object reference to any part of the store.
+	* @returns {string} The path of the object relative to the base store.
+	*/
 	path(obj) {
 		if (typeof obj != "object") throw ("Expected object, got " + (typeof obj) + ".");
 
@@ -721,6 +785,11 @@ export default class Catalyst {
 		return path;
 	}
 
+	/**
+	* Takes a part of the store and returns the parent of that object in the store.
+	* @param {Object|string} pathOrObject - An object reference or a string path that represents any part of the store.
+	* @returns {Object} An object reference to the parent of the given path or object.
+	*/
 	parent(pathOrObject) {
 		if (typeof pathOrObject == "string") {
 
@@ -741,6 +810,11 @@ export default class Catalyst {
 		else throw ("Expected string or object, got " + (typeof pathOrObject) + ".");
 	}
 
+	/**
+	* Takes a part of the store and returns if that part has any fragments.
+	* @param {Object|string} pathOrObject - An object reference or a string path that represents any part of the store.
+	* @returns {number} The number of fragments.
+	*/
 	isFragment(pathOrObject) {
 
 		// Prep path
@@ -758,6 +832,12 @@ export default class Catalyst {
 
 	}
 
+	/**
+	* Creates a new fragment, which freezes reference and allows relative access to the given part of the state.
+	* @param {Object|string} pathOrObject - An object reference or a string path that represents any object/array part of the store.
+	* @callback onDissolve - Invoked when the fragment is dissolved. Can be used for external clean-up. Do NOT update the store here!
+	* @returns {Object} A new fragment object.
+	*/
 	fragment(pathOrObject, onDissolve) {
 
 		// Prep path
@@ -920,6 +1000,10 @@ export default class Catalyst {
 
 	}
 
+	/**
+	* Takes a part of the store and dissolves all it's fragments, unfreezing the references. Also automatically called when necessary upon undo/redo.
+	* @param {Object|string} pathOrObject - An object reference or a string path that represents any object/array part of the store.
+	*/
 	augment(pathOrObject) {
 
 		// Prep path
@@ -1379,6 +1463,15 @@ export default class Catalyst {
 	// OBSERVER METHODS
 	// ---------------------------
 
+	/**
+	* Looks for changes to existing or non-existing part of the store.
+	* @param {Object|string} pathOrObject - An object reference or a string path that represents any part of the store.
+	* @callback fn - Invoked when the observed part of the store changes. Do NOT update the store here.
+	* @param {boolean} children - If true, looks for changes to nested child properties.
+	* @param {boolean} deep - If true, looks for changes to the entire nested object tree. Overrides children to true.
+	* @param {boolean} init - Invokes the callback once immediately after successful registration.
+	* @returns {Object} An ID that can be used to unregister the observer.
+	*/
 	observe(pathOrObject, fn, children = false, deep = false, init = true, origin) {
 
 		// Prep path
@@ -1427,6 +1520,11 @@ export default class Catalyst {
 		return id;
 	}
 
+	/**
+	* Unregisters observe callback.
+	* @param {number} id - The ID that was returned on registering the callback.
+	* @returns {boolean} Whether the callback was successfully unregistered.
+	*/
 	stopObserve(id) {
 
 		if (this.observers.hasOwnProperty(id)) {
@@ -1550,6 +1648,9 @@ export default class Catalyst {
 
 	}
 
+	/**
+	* Defers all observer callbacks. Stackable.
+	*/
 	deferObservers() {
 
 		// Create new stack!
@@ -1560,6 +1661,10 @@ export default class Catalyst {
 
 	}
 
+	/**
+	* Stops deferring observers and invokes deffered callbacks. Stackable.
+	* @param {boolean} all - If true, invokes callbacks from all stacked defers.
+	*/
 	resumeObservers(all = false) {
 
 		// Check
@@ -1610,6 +1715,10 @@ export default class Catalyst {
 
 	}
 
+	/**
+	* Invokes all callbacks observing a given part of the store.
+	* @param {Object|string} pathOrObject - An object reference or a string path that represents any part of the store.
+	*/
 	refresh(pathOrObject) {
 
 		// Declare path and it's variants
@@ -1661,6 +1770,14 @@ export default class Catalyst {
 	// INTERCEPTOR METHODS
 	// ---------------------------
 
+	/**
+	* Intercepts (or validates) changes to an existing or non-existing part of the store. Similar to a middleware. Supports cascading updates to store.
+	* @param {Object|string} pathOrObject - An object reference or a string path that represents any part of the store.
+	* @callback fn - Invoked when the given part of the store changes. Cascaded updates to other parts of the store are batched as single atomic history record.
+	* @param {boolean} children - If true, intercepts changes to nested child properties.
+	* @param {boolean} deep - If true, intercepts changes to the entire nested object tree. Overrides children to true.
+	* @returns {Object} An ID that can be used to unregister the interceptor.
+	*/
 	intercept(pathOrObject, fn, children = false, deep = false, origin) {
 
 		// Prep path
@@ -1702,6 +1819,11 @@ export default class Catalyst {
 		return id;
 	}
 
+	/**
+	* Unregisters intercept callback.
+	* @param {number} id - The ID that was returned on registering the callback.
+	* @returns {boolean} Whether the callback was successfully unregistered.
+	*/
 	stopIntercept(id) {
 
 		if (this.interceptors.hasOwnProperty(id)) {
