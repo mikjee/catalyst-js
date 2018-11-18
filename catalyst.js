@@ -23,7 +23,6 @@ export default class Catalyst {
 		this.resolveContext = false;										// PRIVATE:
 		this.preserveReferences = true;										// PUBLIC:
 		this.preserveFragments = true;										// PUBLIC:
-		// TODO: test preserveReferences
 
 		// History - supports undo/redo, batched operations, aggregation!
 		this.history = history;												// PRIVATE:
@@ -67,7 +66,6 @@ export default class Catalyst {
 		// Proxify and create our store
 		this.root = {};
 		this.store = this.proxify(this.root, this, "", []);
-		// TODO: add __proto__ methods here !
 
 		// Add the user provided object to the store - one prop at a time!
 		this.stopRecord();
@@ -160,16 +158,15 @@ export default class Catalyst {
 
 			getStore = () => this.store,
 
-			getIsFragment = function(path) {
-				if (typeof path == "undefined") return 0;
-				else if (path.length == 0) return 0;
-				else return this.isFragment(path);
+			getIsFragment = function(pathOrObject) {
+				if (typeof pathOrObject == "undefined") return 0;
+				else if (typeof pathOrObject == "object") return this.isFragment(pathOrObject);
+				else if (typeof pathOrObject == "string") return this.isFragment(pathOrObject);
+				else throw ("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
 			};
 
 		// TODO: write parsable comments on functions and purpose of variables - also mark if they are to be used by user or internal only!
 		// TODO: must have ability to add functions to the store! like ToJSON etc. Esp to areas not recorded ! - WONT work as it will stop recording due to use of JSON in history creation!
-		// TODO: add optimization for arrays...better observation for array elements?
-		// TODO: use setPrototype on root level object to give access to controller on every level? !!!!!!!!! must do!!!
 		// TODO: ObserveAsync is not working - always sync!
 
 		// Access to controllers
@@ -217,14 +214,15 @@ export default class Catalyst {
 			get historyBatchModes() { return getHistoryBatchModes(); },
 
 			parse: this.parse.bind(this),
+			path: this.path.bind(this),
 			parent: this.parent.bind(this),
 			fragment: this.metaProxify(this.fragment, this),
 			isFragment: this.metaProxify(getIsFragment, this),
 			get fragmentPath() { return ""; },
 			augment: this.metaProxify(this.augment, this),
 
-			observe: this.metaProxify(function (path, fn, children = false, deep = false, init = true)
-					{ return this.observe(path, fn, children, deep, init, this.catalyst); }, this),
+			observe: this.metaProxify(function (pathOrObject, fn, children = false, deep = false, init = true)
+					{ return this.observe(pathOrObject, fn, children, deep, init, this.catalyst); }, this),
 			stopObserve: this.stopObserve.bind(this),
 			deferObservers: this.deferObservers.bind(this),
 			resumeObservers: this.resumeObservers.bind(this),
@@ -236,8 +234,8 @@ export default class Catalyst {
 			get isObserveDeferred() { return getObserveDeffered(); },
 			set isObserveDeferred(value) { setObserveDeffered(value); },
 
-			intercept: this.metaProxify(function (path, fn, children = false, deep = false)
-						{ return this.intercept(path, fn, children, deep, this.catalyst); }, this),
+			intercept: this.metaProxify(function (pathOrObject, fn, children = false, deep = false)
+						{ return this.intercept(pathOrObject, fn, children, deep, this.catalyst); }, this),
 			stopIntercept: this.stopIntercept.bind(this),
 
 			get store() { return getStore(); }
@@ -715,6 +713,14 @@ export default class Catalyst {
 
 	}
 
+	path(obj) {
+		if (typeof obj != "object") throw ("Expected object, got " + (typeof obj) + ".");
+
+		let context = this.resolve(obj, true);
+		path = context.path;
+		return path;
+	}
+
 	parent(pathOrObject) {
 		if (typeof pathOrObject == "string") {
 
@@ -735,7 +741,13 @@ export default class Catalyst {
 		else throw ("Expected string or object, got " + (typeof pathOrObject) + ".");
 	}
 
-	isFragment(path) {
+	isFragment(pathOrObject) {
+
+		// Prep path
+		let path;
+		if (typeof pathOrObject == "object") path = this.path(pathOrObject);
+		else if (typeof pathOrObject == "string") path = pathOrObject;
+		else throw ("Expected string or object, got " + (typeof pathOrObject) + ".");
 
 		// Sanitize propertypath
 		if (!path.length) return 0;
@@ -746,7 +758,13 @@ export default class Catalyst {
 
 	}
 
-	fragment(path, onDissolve) {
+	fragment(pathOrObject, onDissolve) {
+
+		// Prep path
+		let path;
+		if (typeof pathOrObject == "object") path = this.path(pathOrObject);
+		else if (typeof pathOrObject == "string") path = pathOrObject;
+		else throw ("Expected string or object, got " + (typeof pathOrObject) + ".");
 
 		// Sanitize propertypath
 		if (!path.length) throw "Path is an empty string.";
@@ -754,7 +772,7 @@ export default class Catalyst {
 
 		// Check if path exists and is an object
 		let store = this.parse(path);
-		if (typeof store != "object") throw "Path must be an existing valid part of the store (object or array).";
+		if (typeof store != "object") throw "Path must represent an existing valid part of the store.";
 
 		// Create ID
 		this._fragCounter = (this._fragCounter || 1) + 1;
@@ -777,8 +795,7 @@ export default class Catalyst {
 
 		// Helper
 		let normalize = _path => {
-			if (typeof _path != "string") return path;
-			else if (_path.length > 0) return path + (_path[0] == "." ? "" : ".") + _path;
+			if (_path.length > 0) return path + (_path[0] == "." ? "" : ".") + _path;
 			else return path;
 		};
 
@@ -827,37 +844,60 @@ export default class Catalyst {
 		};
 
 		// Prep methods that use relative paths
-		let observe = function(_path, fn, children = false, deep = false, init = true) {
-			internal.observers.push(this.observe(normalize(_path), fn, children, deep, init, fragment));
+		let observe = function(pathOrObject, fn, children = false, deep = false, init = true) {
+			if (typeof pathOrObject == "undefined") internal.observers.push(this.observe(path, fn, children, deep, init, fragment));
+			else if (typeof pathOrObject == "object") internal.observers.push(this.observe(pathOrObject, fn, children, deep, init, fragment));
+			else if (typeof pathOrObject == "string") internal.observers.push(this.observe(normalize(pathOrObject), fn, children, deep, init, fragment));
+			else throw ("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
+
 			return internal.observers[internal.observers.length - 1];
 		};
 
 		let refresh = function(pathOrObject) {
 			if (typeof pathOrObject == "undefined") return this.refresh(path);
+			else if (typeof pathOrObject == "object") return this.refresh(pathOrObject);
 			else if (typeof pathOrObject == "string") return this.refresh(normalize(pathOrObject));
-			else return this.refresh(pathOrObject);
+			else throw ("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
 		};
 
-		let intercept = function(_path, fn, children = false, deep = false) {
-			internal.interceptors.push(this.intercept(normalize(_path), fn, children, deep, fragment));
+		let intercept = function(pathOrObject, fn, children = false, deep = false) {
+			if (typeof pathOrObject == "undefined") internal.interceptors.push(this.intercept(path, fn, children, deep, fragment));
+			else if (typeof pathOrObject == "object") internal.interceptors.push(this.intercept(pathOrObject, fn, children, deep, fragment));
+			else if (typeof pathOrObject == "string") internal.interceptors.push(this.intercept(normalize(pathOrObject), fn, children, deep, fragment));
+			else throw ("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
+
 			return internal.interceptors[internal.interceptors.length - 1];
 		};
 
-		let isFragment = function(_path) {
-			if (typeof _path == "undefined") return this.isFragment(path);
-			else if (_path.length == 0) return this.isFragment(path);
-			else return this.isFragment(normalize(_path));
+		let isFragment = function(pathOrObject) {
+			if (typeof pathOrObject == "undefined") return this.isFragment(path);
+			else if (typeof pathOrObject == "object") return this.isFragment(pathOrObject);
+			else if (typeof pathOrObject == "string") return this.isFragment(normalize(pathOrObject));
+			else throw ("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
 		};
 
 		let parent = function(pathOrObject) {
 			if (typeof pathOrObject == "undefined") return this.parent(path);
+			else if (typeof pathOrObject == "object") return this.parent(pathOrObject);
 			else if (typeof pathOrObject == "string") return this.parent(normalize(pathOrObject));
-			else return this.parent(pathOrObject);
+			else throw ("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
 		};
 
 		let parse = function(_path) { return this.parse(normalize(_path)); };
-		let fragmentFn = function(_path, _onDissolve) { return this.fragment(normalize(_path), _onDissolve); };
-		let augment = function (_path) { return this.augment(normalize(_path)); }
+
+		let fragmentFn = function(pathOrObject, _onDissolve) {
+			if (typeof pathOrObject == "undefined") return this.fragment(path, _onDissolve);
+			else if (typeof pathOrObject == "object") return this.fragment(pathOrObject, _onDissolve);
+			else if (typeof pathOrObject == "string") return this.fragment(normalize(pathOrObject), _onDissolve);
+			else throw ("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
+		};
+
+		let augment = function (pathOrObject) {
+			if (typeof pathOrObject == "undefined") return this.augment(path);
+			else if (typeof pathOrObject == "object") return this.augment(pathOrObject);
+			else if (typeof pathOrObject == "string") return this.augment(normalize(pathOrObject));
+			else throw ("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
+		}
 
 		// Assign the methods that use relative paths
 		fragment.isFragment = this.metaProxify(isFragment, this);
@@ -880,7 +920,13 @@ export default class Catalyst {
 
 	}
 
-	augment(path) {
+	augment(pathOrObject) {
+
+		// Prep path
+		let path;
+		if (typeof pathOrObject == "object") path = this.path(pathOrObject);
+		else if (typeof pathOrObject == "string") path = pathOrObject;
+		else throw ("Expected string or object, got " + (typeof pathOrObject) + ".");
 
 		// Sanity
 		if (typeof path != "string") return false;
@@ -910,12 +956,12 @@ export default class Catalyst {
 		this.resolveMode = true;
 		this.resolveContext = getContext;
 
-		let target = obj.anything;
+		let resolved = obj.anything;
 
 		this.resolveMode = false;
 		this.resolveContext = false;
 
-		return target;
+		return resolved;
 	}
 
 	// TODO: use resolveContext and decorators to create an alternative to metaProxify
@@ -1125,7 +1171,6 @@ export default class Catalyst {
 
 			// Hold all the keys
 			let keys = {};
-			//let indexes = []; // TODO: implement this below !
 
 			// Each new/old property (loop over newValue & oldValue)
 			if (_isOldObj) for(var key in _oldValue) keys[key] = true;
@@ -1334,8 +1379,13 @@ export default class Catalyst {
 	// OBSERVER METHODS
 	// ---------------------------
 
-	// TODO: add ability to pass object and not path!
-	observe(path, fn, children = false, deep = false, init = true, origin) {
+	observe(pathOrObject, fn, children = false, deep = false, init = true, origin) {
+
+		// Prep path
+		let path;
+		if (typeof pathOrObject == "object") path = this.path(pathOrObject);
+		else if (typeof pathOrObject == "string") path = pathOrObject;
+		else throw ("Expected string or object, got " + (typeof pathOrObject) + ".");
 
 		// Sanitize propertypath
 		if (!path.length) return false;
@@ -1600,7 +1650,7 @@ export default class Catalyst {
 			paths = context2.paths;
 		}
 
-		else throw ("Expected path (string) or state reference (object), got " + (typeof pathOrObject) + ".");
+		else throw ("Expected string or object, got " + (typeof pathOrObject) + ".");
 
 		// Invoke all observers for the path
 		this.observerNotifier(path, pathc, paths, undefined, path, undefined, false, true);
@@ -1611,7 +1661,13 @@ export default class Catalyst {
 	// INTERCEPTOR METHODS
 	// ---------------------------
 
-	intercept(path, fn, children = false, deep = false, origin) {
+	intercept(pathOrObject, fn, children = false, deep = false, origin) {
+
+		// Prep path
+		let path;
+		if (typeof pathOrObject == "object") path = this.path(pathOrObject);
+		else if (typeof pathOrObject == "string") path = pathOrObject;
+		else throw ("Expected string or object, got " + (typeof pathOrObject) + ".");
 
 		// Sanitize propertypath
 		if (!path.length) return false;

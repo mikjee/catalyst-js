@@ -477,7 +477,15 @@ describe("History", () => {
 	});
 
 	test('ref(o) + undo() + redo()', () => {
+		store.a = { b: true };
+		store.a = { b: false };
+		let ref = store.a
 
+		catalyst.undo();
+		expect(ref).toBe(store.a);
+
+		catalyst.redo();
+		expect(ref).toBe(store.a);
 	});
 
 	test('auto commit()', ()=> {
@@ -951,7 +959,13 @@ describe("Fragmentation", () => {
 	});
 
 	test('fragment(a)->a (preserveRef=false)', () => {
+		catalyst.preserveReferences = false;
+		store.a = [[1,2,3], [4,5,6]];
+		let fragment = catalyst.fragment.a[0]();
 
+		store.a = [[7,8,9]];
+		expect(fragment.store).toMatchObject([7,8,9]);
+		expect(store.a).toMatchObject([[7,8,9]]);
 	});
 
 	test('dissolve() + o -> undef (preserveRef=false)', () => {
