@@ -12,7 +12,7 @@ export default class Catalyst {
 	* @param {Object} obj - The base object to create the store from.
 	* @param {Object[]} history - Array of history steps, recent to oldest. Obtained by historyObservers.
 	* @param {number} historyCurrent - The current state of the store relative to history steps. Most recent is 0.
-	* @callback historyFeed - Function called when Catalyst runs out of undoable steps - to be fed older history.
+	* @param {historyFeedCB} historyFeed - Function called when Catalyst runs out of undoable steps - to be fed older history.
 	* @param {char} accessor - Character to be used as separation/ accessor in nested property paths.
 	* @returns {Object} The state store.
 	*/
@@ -716,7 +716,7 @@ export default class Catalyst {
 
 	/**
 	* Registers a callback to be invoked when a history record is created/updated/deleted.
-	* @callback fn - The function to be used as the callback.
+	* @param {historyCB} fn - The function to be used as the callback.
 	* @returns {number} An ID that can be used to unregister the callback.
 	*/
 	observeHistory(fn) {
@@ -835,7 +835,7 @@ export default class Catalyst {
 	/**
 	* Creates a new fragment, which freezes reference and allows relative access to the given part of the state.
 	* @param {Object|string} pathOrObject - An object reference or a string path that represents any object/array part of the store.
-	* @callback onDissolve - Invoked when the fragment is dissolved. Can be used for external clean-up. Do NOT update the store here!
+	* @param {dissolveCB} onDissolve - Invoked when the fragment is dissolved. Can be used for external clean-up. Do NOT update the store here!
 	* @returns {Object} A new fragment object.
 	*/
 	fragment(pathOrObject, onDissolve) {
@@ -1466,7 +1466,7 @@ export default class Catalyst {
 	/**
 	* Looks for changes to existing or non-existing part of the store.
 	* @param {Object|string} pathOrObject - An object reference or a string path that represents any part of the store.
-	* @callback fn - Invoked when the observed part of the store changes. Do NOT update the store here.
+	* @param {observeCB} fn - Invoked when the observed part of the store changes. Do NOT update the store here.
 	* @param {boolean} children - If true, looks for changes to nested child properties.
 	* @param {boolean} deep - If true, looks for changes to the entire nested object tree. Overrides children to true.
 	* @param {boolean} init - Invokes the callback once immediately after successful registration.
@@ -1773,7 +1773,7 @@ export default class Catalyst {
 	/**
 	* Intercepts (or validates) changes to an existing or non-existing part of the store. Similar to a middleware. Supports cascading updates to store.
 	* @param {Object|string} pathOrObject - An object reference or a string path that represents any part of the store.
-	* @callback fn - Invoked when the given part of the store changes. Cascaded updates to other parts of the store are batched as single atomic history record.
+	* @param {interceptCB} fn - Invoked when the given part of the store changes. Cascaded updates to other parts of the store are batched as single atomic history record.
 	* @param {boolean} children - If true, intercepts changes to nested child properties.
 	* @param {boolean} deep - If true, intercepts changes to the entire nested object tree. Overrides children to true.
 	* @returns {Object} An ID that can be used to unregister the interceptor.
@@ -1914,3 +1914,39 @@ export default class Catalyst {
 	}
 
 };
+
+/**
+ * @callback historyFeedCB
+ * @param {number} required - The index of the first history record required, relative to the most recent history record.
+ * @param {number} target - The index of the last history record required, as part of multi-undo operation.
+ * @param {string} timestamp - The unique timestamp of the oldest history record currently available to Catalyst.
+ */
+
+ /**
+  * @callback historyCB
+  * @param {string} type - Operation type - add / delete / update.
+  * @param {Object} history - The history record. Contains an unique timestamp.
+  * @param {Object} store - The Catalyst base store. Supports JSON.stringify.
+  */
+
+ /**
+  * @callback dissolveCB
+  */
+
+  /**
+  * @callback observeCB
+  * @param {string} path - The path of the changed part of the store, relative to the origin.
+  * @param {*} oldValue - Value of the part of the store before the change.
+  * @param {Object} origin - Catalyst or the fragment via which the observer callback was registered.
+  * @param {string} opPath - The path to the top-level part of the store, relative to the base store, which was originally changed. Could be different from path for child and deep observers.
+  * @param {*} opOldValue - Value of the top-level part of the store which was originally changed.
+  */
+
+  /**
+  * @callback interceptCB
+  * @param {string} path - The path of the changed part of the store, relative to the origin.
+  * @param {*} newValue - Value of the part of the store before the change.
+  * @param {Object} origin - Catalyst or the fragment via which the observer callback was registered.
+  * @param {string} opPath - The path to the top-level part of the store, relative to the base store, which was originally changed. Could be different from path for child and deep observers.
+  * @param {*} opOldValue - Value of the top-level part of the store which was originally changed.
+  */
