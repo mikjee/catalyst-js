@@ -18,4 +18,4 @@ Catalyst makes state management easier by using Javascript proxies. It facilitat
 
 To start using it, all you need to do is install the NPM package `catalyst-js` and import the `Catalyst` class.
 
-Then you can [create your state-store](create.md).
+Follow the [quick walkthrough](install.md).

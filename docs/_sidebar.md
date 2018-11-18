@@ -1,7 +1,7 @@
 - Getting started
-
-  - [Create a store](create.md)
-  - [React to changes](observe.md)
+  - [Install](install.md)
+  - [Create store](create.md)
+  - [Watch for changes](observe.md)
   - [Undo and redo](history.md)
   - [Validate changes](intercept.md)
   - [Separate concerns](fragment.md)
