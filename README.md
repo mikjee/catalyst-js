@@ -2,8 +2,6 @@
 
 > An observable state-store for Javascript.
 
-![logo](./docs/cover_new.svg)
-
 ## What is it?
 
 Catalyst makes state management awesome by using [ES6 proxies](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy). It facilitates reactive access to a central state store (object), and allows validation and keeping track of all updates to it. Catalyst also enables distributing parts of the state to separate concerns, while maintaining a common history.
@@ -20,7 +18,7 @@ Catalyst makes state management awesome by using [ES6 proxies](https://developer
 
 To start using it, all you need to do is install the NPM package `catalyst-js` and import the `Catalyst` class.
 
-Follow the [quick walkthrough](walkthrough/install.md) to become Awesome!
+Follow the [quick walkthrough](docs/walkthrough/install.md) to become Awesome!
 
 ## Feedback
 
