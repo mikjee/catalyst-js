@@ -49,7 +49,7 @@ A fragment is dissolved by calling the `fragment.dissolve()` method. Doing so un
 
 ```javascript
 store.a = {b: {c: true}};
-let fragment = catalyst.fragment(() => console.log('I be gone!'));
+let fragment = catalyst.fragment.a.b(() => console.log('I be gone!'));
 
 fragment.dissolve(); 	// Prints 'I be gone!'
 ```

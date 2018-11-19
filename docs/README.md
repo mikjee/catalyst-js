@@ -18,7 +18,7 @@ Catalyst makes state management awesome by using [ES6 proxies](https://developer
 
 To start using it, all you need to do is install the NPM package `catalyst-js` and import the `Catalyst` class.
 
-Follow the [quick walkthrough](install.md) to become Awesome!
+Follow the [quick walkthrough](walkthrough/install.md) to become Awesome!
 
 ## Feedback
 
