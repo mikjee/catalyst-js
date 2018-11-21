@@ -4,6 +4,8 @@ Intercepts (or validates) changes to an existing (or non-existing) part of the s
 
 Supports cascading updates to the store. Can be chained together by registering multiple interceptors to the same part of the store.
 
+When called via a fragment, the interceptor will be un-registered when the fragment [dissolves](reference/fragments.md#dissolve).
+
 #### Syntax
 
 ```javascript
@@ -34,8 +36,7 @@ catalyst.intercept.property1.property2.[..].propertyN()
 #### Return
 
 
-If successful, a positive integer representing the ID, to be used when un-registering the interceptor.
-`false` if unsuccessful.
+If successful, a positive integer representing the ID, to be used when un-registering the interceptor. `false` if unsuccessful.
 
 ---
 
@@ -48,7 +49,7 @@ Updates to store done inside the callback (cascaded changes) will be [batched](r
 #### Syntax
 
 ```javascript
-function (path, oldValue, origin, opPath, opOldValue) {...}
+function (path, newValue, origin, opPath, opNewValue) {...}
 ```
 
 #### Parameters
@@ -96,5 +97,3 @@ catalyst.stopIntercept(id)
 #### Return
 
 `true` or `false` on whether the un-registration was successful.
-
----

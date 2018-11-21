@@ -2,6 +2,8 @@
 
 Looks for changes to existing or non-existing part of the store.
 
+When called via a fragment, the observer will be un-registered when the fragment [dissolves](reference/fragments.md#dissolve).
+
 #### Syntax
 
 ```javascript
@@ -32,8 +34,7 @@ catalyst.observe.property1.property2.[..].propertyN()
 
 #### Return
 
-If successful, a positive integer representing the ID, to be used when un-registering the observer.
-`false` if unsuccessful.
+If successful, a positive integer representing the ID, to be used when un-registering the observer. `false` if unsuccessful.
 
 ---
 
