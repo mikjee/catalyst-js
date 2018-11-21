@@ -1,6 +1,6 @@
 ## Separate concerns
 
-One easy way of distributing the state to different components / entities is to obtain a reference to any part of the store object and pass it to the entity. Catalyst [preserves references](basic/references.md) by default, so any update to the parent of the `ref` will reflect in the `ref` as well.
+One easy way of distributing the state to different components / entities is to obtain a reference to any part of the store object and pass it to the entity. Catalyst [preserves references](reference/store.md#preserveReferences) by default, so any update to the parent of the `ref` will reflect in the `ref` as well.
 
 ```javascript
 store.a = {b: {c: true}};
@@ -41,7 +41,7 @@ delete store.a;					// Has no effect!
 
 Apart from freezing the references leading to the fragmented portion of the store, fragments also expose `observe()`, `intercept()` and other methods that can be used **relative** to the fragmented path.
 
-?> For the full specs of methods exposed by fragment, see the [fragments](fragments/relativity.md) reference.
+?> For the full specs of methods exposed by fragment, see the [fragments](reference/fragments.md#fragment) reference.
 
 ## Dissolving fragments
 

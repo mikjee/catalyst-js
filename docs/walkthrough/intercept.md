@@ -19,7 +19,7 @@ console.log(store.a.b.c);	// Prints 6.
 
 Interceptor callback is passed the property path and the new intended value of the property. Similar to observers, they can intercept the child or deeply nested child properties too.
 
-?> See all ways of registering an interceptor in the [intercept](interceptor/intercept.md) reference.
+?> See all ways of registering an interceptor in the [intercept](reference/interceptors.md#intercept) reference.
 
 However, unlike observers, interceptors are expected to return a value. The value returned is treated as the effective new value for the changed property. If the value returned by an interceptor is undefined, the property will be deleted.
 

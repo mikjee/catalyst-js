@@ -24,7 +24,7 @@ Undoing (or redoing) invokes observers as the changes are played back. Since obs
 
 When Catalyst runs out of history steps to undo, it can invoke a callback to feed it history from before what has been undone already.
 
-?> See the [observeHistory](history/observeHistory.md) and [historyFeed](history/historyFeed.md) reference for how to save and load hsitory steps on-demand from your backend server. 
+?> See the [observeHistory](reference/history.md#observeHistory) and [historyFeed](reference/history.md#historyFeed) reference for how to save and load hsitory steps on-demand from your backend server.
 
 ## Redo
 
@@ -52,6 +52,6 @@ console.log(store.a); 	// Prints 4.
 
 Batch operations can be very useful in debouncing multiple consecutive updates to the store, and treating them as singular - like a click-n-drag to draw operation on MS Paint.
 
-?> For a full list of possibilities with batching, see the [batch](history/batch.md) reference.
+?> For a full list of possibilities with batching, see the [batch](reference/history.md#batch) reference.
 
 Now, let us learn how to prevent changes from happening, and validate them.

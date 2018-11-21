@@ -4,7 +4,7 @@ Intercepts (or validates) changes to an existing (or non-existing) part of the s
 
 Supports cascading updates to the store. Can be chained together by registering multiple interceptors to the same part of the store.
 
-When called via a fragment, the interceptor will be un-registered when the fragment [dissolves](reference/fragments.md#dissolve).
+!> When called via a fragment, the interceptor will be un-registered when the fragment [dissolves](reference/fragments.md#dissolve).
 
 #### Syntax
 

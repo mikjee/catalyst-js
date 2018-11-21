@@ -2,7 +2,7 @@
 
 Looks for changes to existing or non-existing part of the store.
 
-When called via a fragment, the observer will be un-registered when the fragment [dissolves](reference/fragments.md#dissolve).
+!> When called via a fragment, the observer will be un-registered when the fragment [dissolves](reference/fragments.md#dissolve).
 
 #### Syntax
 

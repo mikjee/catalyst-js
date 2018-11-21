@@ -34,7 +34,7 @@ store.a.b.c.d.e = {};		// Deep
 store.a.b.c.d.e.f = {} 		// Deep
 ```
 
-?> For a full list of ways to register an observer, see the [observers](observer/register.md) reference.
+?> For a full list of ways to register an observer, see the [observers](reference/observers.md#observe) reference.
 
 !> Do **NOT** apply cascading changes to the store in the observer callback. We will see how to do that later in the lessons.
 

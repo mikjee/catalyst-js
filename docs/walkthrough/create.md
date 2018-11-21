@@ -13,7 +13,7 @@ let obj = {a: {b: {c: "Hello world!"}}};
 let catalyst = new Catalyst(obj);
 ```
 
-?> For the full list of arguments that can be passed, see the [constructor](basic/constructor.md) reference.
+?> For the full list of arguments that can be passed, see the [constructor](reference/store.md#constructor) reference.
 
 ## Access the store
 
@@ -24,7 +24,7 @@ catalyst.store.a.b.c = "Awesome!";
 console.log(catalyst.store.a.b.c);
 ```
 
-You cannot change the top level store object `catalyst.store`, but you can set properties to it, like other objects, arrays, values. For a full list of supported types, see the [types](basic/types.md) reference.
+You cannot change the top level store object `catalyst.store`, but you can set properties to it, like other objects, arrays, values. For a full list of supported types, see the [types](reference/store.md#types) reference.
 
 For ease, you can simply obtain a reference to the store object, like so.
 
