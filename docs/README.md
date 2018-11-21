@@ -1,6 +1,6 @@
 ## Catalyst
 
-> An observable state-store for Javascript.
+> An awesome state-store for Javascript.
 
 ## What is it?
 
