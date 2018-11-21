@@ -292,7 +292,7 @@ export default class Catalyst {
 	/**
 	* Starts combining multiple history records into a single atomic step. Stackable.
 	* @param {boolean} aggregate - Combine updates to the same property into a single update.
-	* @param {boolean} history - Preserve order of updates to different properties. Effective only when aggregate is true.
+	* @param {boolean} preserveOrder - Preserve order of updates to different properties. Effective only when aggregate is true.
 	*/
 	batch(aggregate = false, preserveOrder = true) {
 
