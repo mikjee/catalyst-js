@@ -240,15 +240,14 @@ class Catalyst {
 	*/
 	parse(path) {
 
-		// Sanitize propertypath
-		if (!path.length) throw new Error("Path is an empty string.");
+		// Designate ?
+		if (typeof path == "function") path = path();
 
-		// Prep levels
-		let levels = path.split(this.accessor);
-		if (path[0] == this.accessor) levels.shift();
+		// Sanitize propertypath
+		if (!Array.isArray(path)) throw new Error("Expected array, got " + (typeof path) + ".");
 
 		// Get the final value, if can..
-		return levels.reduce((obj, prop) => {
+		return path.reduce((obj, prop) => {
 			if (typeof obj == "undefined") return obj;
 			if (prop.length == 0) return obj;
 			return obj[prop];
@@ -263,10 +262,8 @@ class Catalyst {
 	*/
 	path(obj) {
 		if (typeof obj != "object") throw new Error("Expected object, got " + (typeof obj) + ".");
-
 		let context = this.resolve(obj, true);
-		let path = context.path;
-		return path;
+		return context.path.slice();
 	}
 
 	/**
@@ -275,15 +272,14 @@ class Catalyst {
 	* @returns {Object} An object reference to the parent of the given path or object.
 	*/
 	parent(pathOrObject) {
-		if (typeof pathOrObject == "string") {
 
-			if (pathOrObject.length == 0) throw new Error("Path is an empty string.");
+		// Designate?
+		if (typeof pathOrObject == "function") pathOrObject = pathOrObject();
 
-			let levels = pathOrObject.split(this.accessor);
-			if (pathOrObject[0] == this.accessor) levels.shift();
-			levels.pop();
-
-			return levels.reduce((obj, prop) => prop.length > 0 ? obj && obj[prop] : obj, this.store);
+		// Process
+		if (Array.isArray(pathOrObject)) {
+			if (pathOrObject.length == 0) throw new Error("Parent of root store cannot exist.");
+			return pathOrObject.reduce((obj, prop, index) => (prop.length > 0 && index < pathOrObject.length - 1) ? obj && obj[prop] : obj, this.store);
 		}
 
 		else if (typeof pathOrObject == "object") {
@@ -291,7 +287,7 @@ class Catalyst {
 			return this.parent(path);
 		}
 
-		else throw new Error("Expected string or object, got " + (typeof pathOrObject) + ".");
+		else throw new Error("Expected array or object, got " + (typeof pathOrObject) + ".");
 	}
 
 	/**
@@ -668,7 +664,7 @@ class Catalyst {
 
 				// Prep path - optionally optimize by retreiving from context if oldValue is an object.
 				let __path;
-				if (_isOldObj && isOldValObj) __path = this.resolve(oldVal, true).path.slice();
+				if (_isOldObj && isOldValObj) __path = this.path(oldVal);
 				else {
 					__path = _path.slice();
 					__path.push(key);
@@ -822,7 +818,7 @@ class Catalyst {
 
 		// Prep path - optionally optimize by retreiving from context if oldValue is an object.
 		let path;
-		if (oldType == "object") path = self.resolve(oldValue, true).path.slice();
+		if (oldType == "object") path = self.path(oldValue);
 		else {
 			path = this.path.slice();
 			path.push(prop);

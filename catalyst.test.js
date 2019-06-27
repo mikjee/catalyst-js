@@ -302,16 +302,16 @@ describe("Basic", () => {
 	test('parse()', () => {
 		store.a = {b:{c:{d:{e:true}}}};
 
-		expect(catalyst.parse("a.b.c.d.e")).toBe(true);
-		expect(catalyst.parse("a.b.c.d")).toMatchObject(store.a.b.c.d);
-		expect(catalyst.parse("a.b.c")).toMatchObject(store.a.b.c);
-		expect(catalyst.parse("a.b")).toMatchObject(store.a.b);
-		expect(catalyst.parse("a")).toMatchObject(store.a);
+		expect(catalyst.parse(root.a.b.c.d.e)).toBe(true);
+		expect(catalyst.parse(root.a.b.c.d)).toMatchObject(store.a.b.c.d);
+		expect(catalyst.parse(root.a.b.c)).toMatchObject(store.a.b.c);
+		expect(catalyst.parse(root.a.b)).toMatchObject(store.a.b);
+		expect(catalyst.parse(root.a)).toMatchObject(store.a);
 	});
 
 	test('parent(path)', () => {
 		store.a = { b: { c: true }};
-		expect(catalyst.parent(".a.b")).toMatchObject(store.a);
+		expect(catalyst.parent(root.a.b)).toMatchObject(store.a);
 	});
 
 	test('parent(o)', () => {
