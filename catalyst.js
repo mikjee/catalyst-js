@@ -67,7 +67,8 @@ class Catalyst {
 		this.fragments = {};
 
 		// Observer - does NOT support cascading changes to the store.
-		this.observedTree = { observers: { top: {}, shallow: {}, deep: {} }, children: {} };
+		this.observerTree = { meta: { top: {}, shallow: {}, deep: {}, count: 0 }, children: {} };
+		this.observerTree.parent = this.observerTree;
 		this.observers = {};												// PRIVATE:
 		this.observed = {prop: {}, child:{}, deep: {}};						// PRIVATE:
 		this.observerNotifier = this.notifyObservers.bind(this);			// PRIVATE:
@@ -79,7 +80,8 @@ class Catalyst {
 		};
 
 		// Interceptor - supports cascading changes to the store and are auto-batched to be atomic! They are not executed on undo/redo!
-		this.interceptedTree = { interceptors: { top: {}, shallow: {}, deep: {} }, children: {} };
+		this.interceptorTree = { meta: { top: {}, shallow: {}, deep: {}, count: 0 }, children: {} };
+		this.interceptorTree.parent = this.interceptorTree;
 		this.interceptors = {};												// PRIVATE:
 		this.intercepted = {prop: {}, child:{}, deep: {}};					// PRIVATE:
 		this.interceptorNotifier = this.notifyInterceptors.bind(this);		// PRIVATE:
@@ -230,65 +232,59 @@ class Catalyst {
 	}
 
 	// ---------------------------
-	// FRAGMENTATION METHODS
+	// HELPER METHODS
 	// ---------------------------
 
-	/**
-	* Parses a nested property path string, and returns the part of the store that it represents.
-	* @param {string} path - The path containing the properties, separated by the accessor character.
-	* @returns {*} The part of the store represented by the path.
-	*/
-	parse(path) {
+	ensureMetaBranch(path, metaRoot, metaCreator) {
 
-		// Designate ?
-		if (typeof path == "function") path = path();
+		let current = this.metaRoot;
 
-		// Sanitize propertypath
-		if (!Array.isArray(path)) throw new Error("Expected array, got " + (typeof path) + ".");
+		path.forEach(prop => {
 
-		// Get the final value, if can..
-		return path.reduce((obj, prop) => {
-			if (typeof obj == "undefined") return obj;
-			if (prop.length == 0) return obj;
-			return obj[prop];
-		}, this.store);
+			if (!current.children[prop]) current.children[prop] = {
+				meta: metaCreator(current, prop),
+				children: {},
+				parent: current
+			};
 
+			current = current.children[prop];
+
+		});
+
+		return current;
 	}
 
-	/**
-	* Takes a part of the store and returns the path of the object relative to the base store.
-	* @param {Object} obj - An object reference to any part of the store.
-	* @returns {string} The path of the object relative to the base store.
-	*/
-	path(obj) {
-		if (typeof obj != "object") throw new Error("Expected object, got " + (typeof obj) + ".");
-		let context = this.resolve(obj, true);
-		return context.path.slice();
-	}
+	shakeMetaBranch(path, metaRoot, flagger) {
 
-	/**
-	* Takes a part of the store and returns the parent of that object in the store.
-	* @param {Object|string} pathOrObject - An object reference or a string path that represents any part of the store.
-	* @returns {Object} An object reference to the parent of the given path or object.
-	*/
-	parent(pathOrObject) {
+		let current = this.metaRoot;
+		let branchPath = [];
 
-		// Designate?
-		if (typeof pathOrObject == "function") pathOrObject = pathOrObject();
+		// Start at root and traverse down to the farthest possible branch
+		path.forEach(prop => {
 
-		// Process
-		if (Array.isArray(pathOrObject)) {
-			if (pathOrObject.length == 0) throw new Error("Parent of root store cannot exist.");
-			return pathOrObject.reduce((obj, prop, index) => (prop.length > 0 && index < pathOrObject.length - 1) ? obj && obj[prop] : obj, this.store);
+			 if (current.children[prop]) {
+				 current = current.children[prop];
+				 branchPath.push(prop);
+			 }
+
+		});
+
+		// Traverse upwards while deleting empty branches as long as possible
+		while (current.parent != current) {
+
+			if (flagger(current, branchPath[branchPath.length - 1])) {
+				current = current.parent;
+				delete current.children[branchPath.pop()];
+			}
+			else break;
+
 		}
 
-		else if (typeof pathOrObject == "object") {
-			let path = this.resolve(pathOrObject, true).path;
-			return this.parent(path);
-		}
-
-		else throw new Error("Expected array or object, got " + (typeof pathOrObject) + ".");
 	}
+
+	// ---------------------------
+	// FRAGMENTATION METHODS
+	// ---------------------------
 
 	/**
 	* Takes a part of the store and returns if that part has any fragments.
@@ -526,6 +522,63 @@ class Catalyst {
 	// ---------------------------
 	// PROXY METHODS
 	// ---------------------------
+
+	/**
+	* Parses a nested property path string, and returns the part of the store that it represents.
+	* @param {string} path - The path containing the properties, separated by the accessor character.
+	* @returns {*} The part of the store represented by the path.
+	*/
+	parse(path) {
+
+		// Designate ?
+		if (typeof path == "function") path = path();
+
+		// Sanitize propertypath
+		if (!Array.isArray(path)) throw new Error("Expected array, got " + (typeof path) + ".");
+
+		// Get the final value, if can..
+		return path.reduce((obj, prop) => {
+			if (typeof obj == "undefined") return obj;
+			if (prop.length == 0) return obj;
+			return obj[prop];
+		}, this.store);
+
+	}
+
+	/**
+	* Takes a part of the store and returns the path of the object relative to the base store.
+	* @param {Object} obj - An object reference to any part of the store.
+	* @returns {string} The path of the object relative to the base store.
+	*/
+	path(obj) {
+
+		if (typeof obj != "object") throw new Error("Expected object, got " + (typeof obj) + ".");
+
+		let context = this.resolve(obj, true);
+		return context.path.slice();
+
+	}
+
+	/**
+	* Takes a part of the store and returns the parent of that object in the store.
+	* @param {Object|string} pathOrObject - An object reference or a string path that represents any part of the store.
+	* @returns {Object} An object reference to the parent of the given path or object.
+	*/
+	parent(pathOrObject) {
+
+		// Designate?
+		if (typeof pathOrObject == "function") pathOrObject = pathOrObject();
+
+		// Process
+		if (Array.isArray(pathOrObject))
+			return pathOrObject.reduce((obj, prop, index) => (prop.length > 0 && index < pathOrObject.length - 1) ? obj && obj[prop] : obj, this.store);
+
+		else if (typeof pathOrObject == "object")
+			return this.parent(this.path(pathOrObject));
+
+		else
+			throw new Error("Expected array or object, got " + (typeof pathOrObject) + ".");
+	}
 
 	resolve(obj, getContext = false) {
 
@@ -908,49 +961,78 @@ class Catalyst {
 	* @param {boolean} init - Invokes the callback once immediately after successful registration.
 	* @returns {Object} An ID that can be used to unregister the observer.
 	*/
-	observe(pathOrObject, fn, children = false, deep = false, init = false, origin) {
+	observe(pathObjDs, fnId, shallow = false, deep = false, init = false, origin) {
 
-		// Prep path
-		let path;
-		if (typeof pathOrObject == "object") path = this.path(pathOrObject);
-		else if (typeof pathOrObject == "string") path = pathOrObject;
-		else throw new Error("Expected string or object, got " + (typeof pathOrObject) + ".");
+		// Prep
+		let paths = [], pre, id;
 
-		// Sanitize propertypath
-		if (!path.length) return false;
-		if (path[0] != this.accessor) path = this.accessor + path;
+		// Retreive pre if ID is given
+		if (typeof fnId != "function") {
+			id = fnId;
+			pre = this.observers[id];
+			origin = pre.origin;
 
-		// Prep origin
-		origin = origin || this.catalyst;
+			if (!pre) throw new Error("Cannot add path(s) to pre-installed observer due to invalid ID!");
+		}
 
-		// Create ID
-		this._obsCounter = (this._obsCounter || 1) + 1;
-		let id = this._obsCounter;
+		// Else generate ID and set origin
+		else {
+			this._obsCounter = (this._obsCounter || 1) + 1;
+			id = this._obsCounter;
+			origin = origin || this.catalyst;
+		}
 
-		// Helper
-		let addObserver = (_path, type) => {
-			if (!this.observed[type][_path]) this.observed[type][_path] = new Map();
-			this.observed[type][_path].set(id, true);
-		};
+		// Prep path and determine if multiple paths have been given
+		if (typeof pathObjDs == "function") paths.push(pathObjDs());
+		else if (Array.isArray(pathObjDs)) {
 
-		// Map observer id to path & object
-		this.observers[id] = {path, fn, children: children || deep, deep, origin};
+			if (pathObjDs.length == 0) paths.push([]);
+			else if (typeof pathObjDs[0] == "string") paths.push(pathObjDs);
+			else pathObjDs.forEach(path => {
+				let type = typeof path;
 
-		// Observe prop
-		addObserver(path, "prop");
+				if (type == "function") paths.push(path());
+				else if (Array.isArray(path)) paths.push(path); 										// Assuming it is an array of array of strings
+				else if (type == "object") paths.push(this.path(path));
+				else throw new Error("Expected designator(s), got some weird array.");
+			});
 
-		// Observe children
-		if (children || deep) addObserver(path, "child");
+		}
+		else if (typeof pathObjDs == "object") paths.push(this.path(pathObjDs));
+		else throw new Error("Expected designator(s), got " + (typeof pathObjDs) + ".");
 
-		// Observe deep
-		if (deep) addObserver(path, "deep");
+		// Set the observer
+		if (!pre) this.observers[id] = {paths, fn, origin};
+		else pre.paths.push(...paths);
+
+		// Add each path to the tree
+		paths.forEach(path => {
+
+			// Create tree branch
+			let branch = this.ensureMetaBranch(path, this.observedTree, () => {
+				top: new Map(),
+				shallow: new Map(),
+				deep: new Map(),
+				count: 0
+			});
+
+			// Add leaf to branch
+			branch.meta.top.set(id, true);
+			if (shallow || deep) branch.meta.shallow.set(id, true);
+			if (deep) branch.meta.deep.set(id, true);
+
+			// Increment counter for branch
+			branch.meta.count ++;
+
+		}):
 
 		// Fire the observer once to initialize?
-		if (init) {
+		// TODO: make this work!
+		/*if (init) {
 			let obsFn = () => fn(path.substr(origin.fragmentPath.length), undefined, path, undefined);
 			if (this.observeAsync) Promise.resolve(true).then(obsFn);
 			else obsFn();
-		}
+		}*/
 
 		// Done
 		return id;
