@@ -155,8 +155,13 @@ class Catalyst {
 		// TODO: must have ability to add functions to the store! like ToJSON etc. Esp to areas not recorded !
 		// TODO: ObserveAsync is not working - always sync!
 
+		// Get context
+		let internal = this;
+
 		// Access to controllers
 		this.catalyst = {
+
+			__internal: internal,
 
 			get accessor() { return getAccessor(); },
 
@@ -254,18 +259,33 @@ class Catalyst {
 		return current;
 	}
 
+	getMetaBranch(path, metaRoot) {
+
+		let current = this.metaRoot;
+
+		let ret = path.some(prop => {
+			if (!current.children[prop]) return true;
+			else current = current.children[prop];
+		});
+
+		if (ret) return false;
+		else return current;
+
+	}
+
 	shakeMetaBranch(path, metaRoot, flagger) {
 
 		let current = this.metaRoot;
 		let branchPath = [];
 
 		// Start at root and traverse down to the farthest possible branch
-		path.forEach(prop => {
+		path.some(prop => {
 
 			 if (current.children[prop]) {
 				 current = current.children[prop];
 				 branchPath.push(prop);
 			 }
+			 else return true;
 
 		});
 
@@ -877,6 +897,9 @@ class Catalyst {
 			path.push(prop);
 		}
 
+		// Obtain observer & interceptor branch
+		// Implement caching by saving the branch reference!
+
 		// Fire interceptors
 		try { /*value = self.interceptorNotifier(path, this.path, this.paths, value, oldValue, path, value);*/ }
 		catch (e) {
@@ -998,6 +1021,8 @@ class Catalyst {
 			});
 
 		}
+
+		// TODO: there is going to be an issue with object ? the path extracted from the object context will be the full path - can it interfere with fragment?
 		else if (typeof pathObjDs == "object") paths.push(this.path(pathObjDs));
 		else throw new Error("Expected designator(s), got " + (typeof pathObjDs) + ".");
 
@@ -1009,7 +1034,7 @@ class Catalyst {
 		paths.forEach(path => {
 
 			// Create tree branch
-			let branch = this.ensureMetaBranch(path, this.observedTree, () => {
+			let branch = this.ensureMetaBranch(path, this.observerTree, () => {
 				top: new Map(),
 				shallow: new Map(),
 				deep: new Map(),
@@ -1048,25 +1073,21 @@ class Catalyst {
 		if (this.observers.hasOwnProperty(id)) {
 
 			// Retreive
-			let prop = this.observers[id].path;
+			let obs = this.observers[id];
 
-			// Delete props, child observation Maps
-			this.observed["prop"][prop].delete(id);
-			if (this.observed["child"][prop])
-				if (this.observed["child"][prop].has(id))
-					this.observed["child"][prop].delete(id);
+			// Delete leafs
+			obs.paths.forEach(path => {
+				let branch = getMetaBranch(path, this.observerTree);
 
-			// Delete deep observers
-			let _path = "";
-			let levels = prop.split(this.accessor);
-			levels.shift();
-			for (var count = 0; count < levels.length; count ++) {
-				_path = _path + this.accessor + levels[count];
+				branch.meta.top.delete(id);
+				branch.meta.shallow.delete(id);
+				branch.meta.deep.delete(id);
 
-				if (this.observed["deep"][_path])
-					if (this.observed["deep"][_path].has(id))
-						this.observed["deep"][_path].delete(id);
-			}
+				branch.meta.count --;
+			});
+
+			// Delete branches
+			obs.paths.forEach(path => this.shakeMetaBranch(path, this.observerTree, branch => branch.meta.count < 1));
 
 			// Delete the actual thing
 			delete this.observers[id];
