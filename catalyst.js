@@ -67,20 +67,22 @@ class Catalyst {
 		this.fragments = {};
 
 		// Observer - does NOT support cascading changes to the store.
-		this.observerTree = { meta: { top: {}, shallow: {}, deep: {}, count: 0 }, children: {} };
+		this.observerTree = { metaName: "observer", meta: { top: {}, shallow: {}, deep: {}, count: 0 }, children: {} };
 		this.observerTree.parent = this.observerTree;
 		this.observers = {};												// PRIVATE:
-		this.observed = {prop: {}, child:{}, deep: {}};						// PRIVATE:
-		this.observerNotifier = this.notifyObservers.bind(this);			// PRIVATE:
-		this.observeAsync = false;											// PUBLIC: Whether observers are triggered asynchronously (via Promise microtask) !
-		this.observeDeferred = 0;											// PUBLIC: Whether observations are batched together!
-		this.observations = {												// PRIVATE:
+		//this.observed = {prop: {}, child:{}, deep: {}};						// PRIVATE:
+		this.observeAsync = true;											// PUBLIC: Whether observers are triggered asynchronously (via Promise microtask) !
+		this.deferObservations = 0;											// PUBLIC: Whether observations are batched together!
+		this.isObservationPromised = false;
+		this.queuedObservations = [];
+		this.deferredObservations = [];
+		/*this.observations = {												// PRIVATE:
 			stacks: [],		// Array of maps
 			paths: {}		// paths to stack index
-		};
+		};*/
 
 		// Interceptor - supports cascading changes to the store and are auto-batched to be atomic! They are not executed on undo/redo!
-		this.interceptorTree = { meta: { top: {}, shallow: {}, deep: {}, count: 0 }, children: {} };
+		this.interceptorTree = { metaName: "interceptor", meta: { top: {}, shallow: {}, deep: {}, count: 0 }, children: {} };
 		this.interceptorTree.parent = this.interceptorTree;
 		this.interceptors = {};												// PRIVATE:
 		this.intercepted = {prop: {}, child:{}, deep: {}};					// PRIVATE:
@@ -116,7 +118,7 @@ class Catalyst {
 			getObserveAsync = () => this.observeAsync,
 			setObserveAsync = value => this.observeAsync = value,
 
-			getObserveDeffered = () => this.observeDeferred,
+			getObserveDeffered = () => this.deferObservations,
 			setObserveDeffered = value => {
 				if (typeof value == "number") {
 					if (value > this.observeDeffered) {
@@ -217,8 +219,8 @@ class Catalyst {
 			get isObserveAsync() { return getObserveAsync(); },
 			set isObserveAsync(value) { setObserveAsync(value); },
 
-			get isObserveDeferred() { return getObserveDeffered(); },
-			set isObserveDeferred(value) { setObserveDeffered(value); },
+			get isdeferObservations() { return getObserveDeffered(); },
+			set isdeferObservations(value) { setObserveDeffered(value); },
 
 			get isConcealed() { return getIsConcealed(); },
 			set isConcealed(value) { setIsConcealed(value); },
@@ -242,26 +244,20 @@ class Catalyst {
 
 	ensureMetaBranch(path, metaRoot, metaCreator) {
 
-		let current = this.metaRoot;
+		let current = metaRoot;
 
 		path.forEach(prop => {
-
-			if (!current.children[prop]) current.children[prop] = {
-				meta: metaCreator(current, prop),
-				children: {},
-				parent: current
-			};
-
+			if (!current.children[prop]) current.children[prop] = {	children: {}, parent: current };
 			current = current.children[prop];
-
 		});
 
+		if (!current.meta) current.meta = metaCreator(current, path.length > 0 ? path[path.length - 1] : "");
 		return current;
 	}
 
 	getMetaBranch(path, metaRoot) {
 
-		let current = this.metaRoot;
+		let current = metaRoot;
 
 		let ret = path.some(prop => {
 			if (!current.children[prop]) return true;
@@ -275,8 +271,9 @@ class Catalyst {
 
 	shakeMetaBranch(path, metaRoot, flagger) {
 
-		let current = this.metaRoot;
-		let branchPath = [];
+		let metaName = metaRoot.metaName,
+			current = this.metaRoot,
+			branchPath = [];
 
 		// Start at root and traverse down to the farthest possible branch
 		path.some(prop => {
@@ -293,6 +290,9 @@ class Catalyst {
 		while (current.parent != current) {
 
 			if (flagger(current, branchPath[branchPath.length - 1])) {
+				let context = current.storeBranchRef;
+				if (context) delete context[metaName + "BranchRef"];
+
 				current = current.parent;
 				delete current.children[branchPath.pop()];
 			}
@@ -300,6 +300,22 @@ class Catalyst {
 
 		}
 
+	}
+
+	cacheMetaBranch(path, metaRoot, context) {
+
+		let metaName = metaRoot.metaName;
+		let branch = context[metaName + "BranchRef"];
+
+		if (!branch) {
+			branch = getMetaBranch(path, metaRoot);
+			if (!branch) return false;
+
+			context[metaName + "BranchRef"] = branch;
+			branch.storeBranchRef = context;
+		}
+
+		return branch;
 	}
 
 	// ---------------------------
@@ -646,7 +662,7 @@ class Catalyst {
 
 	}
 
-	deepProxify(_value, _oldValue, _path, value, oldValue, path, misc, obsOldValue) {
+	deepProxify(_value, _oldValue, _path, value, oldValue, path, misc, obsOldValue, oBranch, iBranch) {
 
 		// Diff check
 		if (_value == _oldValue) return _oldValue;
@@ -669,6 +685,7 @@ class Catalyst {
 			let _isOldArr = Array.isArray(_oldValue);
 
 			// Fragmentation check
+			// TODO: fix this!
 			let isFragment = false;
 			// TODO: is fragment should be retreivable from proxy context as object must exist to be a fragment!
 			/*if (_isOldObj) {
@@ -720,6 +737,16 @@ class Catalyst {
 				deletes = [];
 			};
 
+			// Diff helper
+			// TODO: uses double equals instead of triple equals - add test case for objects deep change!
+			let diff = (n, o, r, k) => {
+				if (n == o) {
+					if (!preserveRef) r[k] = o;
+					return false;
+				}
+				return true;
+			};
+
 			// Define object/array key processor
 			let processKey = key => {
 
@@ -730,10 +757,7 @@ class Catalyst {
 				let obsOldVal = _isOldObj ? obsOldValue[key] : undefined;
 
 				// Diff
-				if (newVal == oldVal) {
-					if (!preserveRef) root[key] = oldVal;
-					return;
-				}
+				if (!diff(newVal, oldVal, root, key)) return;
 
 				// Prep path - optionally optimize by retreiving from context if oldValue is an object.
 				let __path;
@@ -743,13 +767,20 @@ class Catalyst {
 					__path.push(key);
 				}
 
-				// Intercept!
-				newVal = this.interceptorNotifier(__path, undefined, undefined, newVal, oldVal, path, value, true, true);
+				// Retrieve observer and interceptor branch - if we have the respective parent branches
+				let _oBranch, _iBranch;
+				if (oBranch) _oBranch = oBranch.children[key];
+				if (iBranch) _iBranch = iBranch.children[key];
 
-				// Diff again!
-				if (newVal == oldVal) {
-					if (!preserveRef) root[key] = oldVal;
-					return;
+				// Intercept!
+				// TODO: fix this!
+				if (_iBranch) {
+					if (_iBranch.meta) {
+						if (_iBranch.meta.top.size > 0) {
+							newVal = this.interceptorNotifier(__path, undefined, undefined, newVal, oldVal, path, value, true, true);
+							if (!diff(newVal, oldVal, root, key)) return;
+						}
+					}
 				}
 
 				// Diff exists
@@ -757,7 +788,7 @@ class Catalyst {
 
 					// newValue is object, this property wont get deleted but updated - must recursively proxify this!
 					if (typeof newVal == "object") {
-						root[key] = this.deepProxify(newVal, oldVal, __path, value, oldValue, path, misc, obsOldVal);
+						root[key] = this.deepProxify(newVal, oldVal, __path, value, oldValue, path, misc, obsOldVal, _oBranch, _iBranch);
 						if (!isOldValObj) misc.changes ++;
 						executeDeletes();
 					}
@@ -767,7 +798,7 @@ class Catalyst {
 
 						// if oldVal was an object, must recurse into subtrees to get unanimity!
 						if (isOldValObj) {
-							let remnant = this.deepProxify(undefined, oldVal, __path, value, oldValue, path, misc, obsOldVal);
+							let remnant = this.deepProxify(undefined, oldVal, __path, value, oldValue, path, misc, obsOldVal, _oBranch, _iBranch);
 
 							if (typeof remnant != "undefined") {
 								root[key] = remnant;
@@ -786,7 +817,7 @@ class Catalyst {
 
 						// if oldVal was an object, must recurse into subtrees to get unanimity!
 						if (isOldValObj) {
-							let remnant = this.deepProxify(undefined, oldVal, __path, value, oldValue, path, misc, obsOldVal);
+							let remnant = this.deepProxify(undefined, oldVal, __path, value, oldValue, path, misc, obsOldVal, _oBranch, _iBranch);
 
 							if (typeof remnant != "undefined") root[key] = remnant;
 							else {
@@ -806,9 +837,14 @@ class Catalyst {
 
 					}
 
-					// Note observation
-					// TODO: can paths fill in for pathc ? everywhere? Is pathc at all required anywhere? is it not part of oaths ??
-					misc.observations.push({path: __path, oldVal: obsOldVal, propOnly: true});
+					// Add observation
+					// TODO: add optimization for array observation? - reshuffle / add / delete etc..
+					if (_oBranch) {
+						if (_oBranch.meta) {
+							if (_oBranch.meta.top.size > 0)
+								misc.observations.push({ path: __path, value: obsOldVal, branch: _oBranch, bubble: false });
+						}
+					}
 
 				}
 
@@ -890,6 +926,7 @@ class Catalyst {
 		};
 
 		// Prep path - optionally optimize by retreiving from context if oldValue is an object.
+		// TODO resolve is much slower than vanilla get - compare getter proxy speed vs array push/slice speed
 		let path;
 		if (oldType == "object") path = self.path(oldValue);
 		else {
@@ -897,10 +934,21 @@ class Catalyst {
 			path.push(prop);
 		}
 
-		// Obtain observer & interceptor branch
-		// Implement caching by saving the branch reference!
+		// Retreive observer & interceptor branch - from cache is oldType is object (only object will have proxy context used for caching)
+		// TODO: add children object on proxy context to hold cache for child value-types meta branche ref??
+		let oBranch, iBranch;
+		/*if (oldType == "object") {
+			oBranch = self.cacheMetaBranch(path, self.observerTree, self.resolve(oldValue)),
+			iBranch = self.cacheMetaBranch(path, self.interceptorTree, self.resolve(oldValue));
+		}
+		else {*/
+			oBranch = self.getMetaBranch(path, self.observerTree),
+			iBranch = self.getMetaBranch(path, self.interceptorTree);
+		//}
 
 		// Fire interceptors
+		// TODO: enable this !
+		// TODO: how escape interceptor chain? - for example for making a catalyst-readonly plugin!
 		try { /*value = self.interceptorNotifier(path, this.path, this.paths, value, oldValue, path, value);*/ }
 		catch (e) {
 			console.error("Discard update (" + path + ") - encountered error!", e);
@@ -922,7 +970,7 @@ class Catalyst {
 			else obsOldValue = oldValue;
 
 			// Deep proxify
-			let result = self.deepProxify(value, oldValue, path, value, oldValue, path, misc, obsOldValue);
+			let result = self.deepProxify(value, oldValue, path, value, oldValue, path, misc, obsOldValue, oBranch, iBranch);
 
 			// Has anything been updated?
 			if (result == oldValue) {
@@ -930,6 +978,7 @@ class Catalyst {
 				// In case of o -> o, we check hasChanged, if no changes are found we exit.
 				if (typeof result == "object") {
 					if (misc.changes == 0) return true;
+					// else is omitted as it means changes have happened inside the object but not at this top level !
 				}
 
 				// for everything else, it means nothing changed!
@@ -945,10 +994,14 @@ class Catalyst {
 			return false;
 		}
 
-		// Add top-level observation
+		// Add top-level observation & enqueue all observations
+		// TODO: HIGH: major bug - this wont work as there can be observers installed above this level.
+		// TODO: HIGH: major bug - the exact path of the change, if the change is deep and the observer is at higher level that needs bubbling, is missed!
+		// TODO: HIGH: multiple changes ??
+		// TODO: HIGH, same entry is enqueued twice because flush is promise-based... 1st enqueue is from before obs installation - a problem - prolly not!
+		misc.observations.push({ path: path, value: obsOldValue, branch: oBranch, bubble: true });
+		self.enqueueObservations(misc.observations);
 		//misc.observations.push({ path: path, pathc: this.path, paths: this.paths, oldVal: obsOldValue, propOnly: false });
-
-		// Fire observers
 		//misc.observations.forEach(obs => self.observerNotifier(obs.path, obs.pathc, obs.paths, obs.oldVal, path, obsOldValue, obs.propOnly));
 
 		// All done
@@ -1027,19 +1080,19 @@ class Catalyst {
 		else throw new Error("Expected designator(s), got " + (typeof pathObjDs) + ".");
 
 		// Set the observer
-		if (!pre) this.observers[id] = {paths, fn, origin};
+		if (!pre) this.observers[id] = {paths, fnId, origin};
 		else pre.paths.push(...paths);
 
 		// Add each path to the tree
 		paths.forEach(path => {
 
 			// Create tree branch
-			let branch = this.ensureMetaBranch(path, this.observerTree, () => {
+			let branch = this.ensureMetaBranch(path, this.observerTree, () => { return {
 				top: new Map(),
 				shallow: new Map(),
 				deep: new Map(),
 				count: 0
-			});
+			}; });
 
 			// Add leaf to branch
 			branch.meta.top.set(id, true);
@@ -1049,13 +1102,13 @@ class Catalyst {
 			// Increment counter for branch
 			branch.meta.count ++;
 
-		}):
+		});
 
 		// Fire the observer once to initialize?
 		// TODO: make this work!
 		/*if (init) {
 			let obsFn = () => fn(path.substr(origin.fragmentPath.length), undefined, path, undefined);
-			if (this.observeAsync) Promise.resolve(true).then(obsFn);
+			if (this.observeAsync) Promise.resolve().then(obsFn);
 			else obsFn();
 		}*/
 
@@ -1101,12 +1154,30 @@ class Catalyst {
 
 	}
 
+	enqueueObservations(observations) {
+		if (this.isConcealed) return;
+		else if (this.deferObservations) this.deferredObservations.push(observations);
+
+		this.queuedObservations.push(observations);
+
+		if (!this.isObservationPromised) {
+			this.isObservationPromised = true;
+			Promise.resolve().then(this.flushObservations.bind(this));
+		}
+	}
+
+	flushObservations() {
+		console.log("Obs Flush", this.queuedObservations);
+		this.queuedObservations = [];
+	}
+
+	// TODO: ths is no longer in use
 	notifyObservers(path, pathc, paths, oldVal, path_, oldVal_, propOnly = false, overrideDefer = false) {
 
 		if (this.isConcealed) return;
 
 		// Are we deferining ? - If yes then save this to the topmost deferred stack!
-		if ((this.observeDeferred > 0) && !overrideDefer) {
+		if ((this.deferObservations > 0) && !overrideDefer) {
 
 			// If the path already exists in an observation, update that observation! NOTE: propOnly minimizes the scope of the observers selected, hence it is AND-ed!
 			let stackIndex = this.observations.paths[path];
@@ -1119,10 +1190,10 @@ class Catalyst {
 				this.observations.stacks[stackIndex].delete(path)
 
 				// Update the path to point to the current stack!
-				this.observations.paths[path] = this.observeDeferred - 1;
+				this.observations.paths[path] = this.deferObservations - 1;
 
 				// Put the new ops in the current stack!
-				this.observations.stacks[this.observeDeferred - 1].set(path, {
+				this.observations.stacks[this.deferObservations - 1].set(path, {
 					path,
 					pathc: pathc || obs.pathc,
 					paths: paths || obs.paths,
@@ -1138,10 +1209,10 @@ class Catalyst {
 			else {
 
 				// Add new path pointing to the current stack!
-				this.observations.paths[path] = this.observeDeferred - 1;
+				this.observations.paths[path] = this.deferObservations - 1;
 
 				// Add the observation to the current stack
-				this.observations.stacks[this.observeDeferred - 1].set(path, {path, pathc, paths, oldVal, path_, oldVal_, propOnly});
+				this.observations.stacks[this.deferObservations - 1].set(path, {path, pathc, paths, oldVal, path_, oldVal_, propOnly});
 
 			}
 
@@ -1201,7 +1272,7 @@ class Catalyst {
 		this.observations.stacks.push(new Map());
 
 		// Increase count
-		this.observeDeferred ++;
+		this.deferObservations ++;
 
 	}
 
@@ -1212,17 +1283,17 @@ class Catalyst {
 	resumeObservers(all = false) {
 
 		// Check
-		if (this.observeDeferred == 0) return;
+		if (this.deferObservations == 0) return;
 
 		// Decrement
-		this.observeDeferred --;
+		this.deferObservations --;
 
 		// Prep
 		let arr = [];
-		let stackIndex = all ? 0 : this.observeDeferred;
+		let stackIndex = all ? 0 : this.deferObservations;
 
 		// For each stack
-		while (stackIndex <= this.observeDeferred) {
+		while (stackIndex <= this.deferObservations) {
 
 			// Publish
 			this.observations.stacks[stackIndex].forEach(obs => {
@@ -1450,10 +1521,10 @@ class Catalyst {
 
 };
 
-export {
+/*export {
 	designator,
 	Catalyst
-};
+};*/
 
  /**
   * @callback dissolveCB
