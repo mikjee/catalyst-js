@@ -1,0 +1,74 @@
+<html>
+	<head>
+		<script type="text/javascript" src="./catalyst.js"></script>
+	</head>
+	<body>
+		Catalyst v1 Test
+		<script type="text/javascript">
+
+			let catalyst = new Catalyst(),
+				store = catalyst.store,
+				root = designator;
+
+			// --------------------------------------------
+			// --------------------------------------------
+
+			store.a = {b:{c:{d:true, e:false}, f:{g: true}, h: true}};
+			let obs = catalyst.observe(root.a, function() { console.log(arguments); }, true, true);
+
+			store.a.b.c.d = false;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+		</script>
+	</body>
+</html>
