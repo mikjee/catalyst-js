@@ -67,7 +67,7 @@ class Catalyst {
 		this.fragments = {};
 
 		// Observer - does NOT support cascading changes to the store.
-		this.observerTree = { metaName: "observer", meta: { top: {}, shallow: {}, deep: {}, count: 0 }, children: {} };
+		this.observerTree = { metaName: "observer", children: {} };
 		this.observerTree.parent = this.observerTree;
 		this.observers = {};												// PRIVATE:
 		//this.observed = {prop: {}, child:{}, deep: {}};						// PRIVATE:
@@ -82,7 +82,7 @@ class Catalyst {
 		};*/
 
 		// Interceptor - supports cascading changes to the store and are auto-batched to be atomic! They are not executed on undo/redo!
-		this.interceptorTree = { metaName: "interceptor", meta: { top: {}, shallow: {}, deep: {}, count: 0 }, children: {} };
+		this.interceptorTree = { metaName: "interceptor", children: {} };
 		this.interceptorTree.parent = this.interceptorTree;
 		this.interceptors = {};												// PRIVATE:
 		this.intercepted = {prop: {}, child:{}, deep: {}};					// PRIVATE:
@@ -246,8 +246,8 @@ class Catalyst {
 
 		let current = metaRoot;
 
-		path.forEach(prop => {
-			if (!current.children[prop]) current.children[prop] = {	children: {}, parent: current };
+		path.forEach((prop,i) => {
+			if (!current.children[prop]) current.children[prop] = {	children: {}, parent: current, symbol: Symbol(prop), pathLength: i };
 			current = current.children[prop];
 		});
 
@@ -255,7 +255,7 @@ class Catalyst {
 		return current;
 	}
 
-	getMetaBranch(path, metaRoot) {
+	getMetaBranch(path, metaRoot, nearest = false) {
 
 		let current = metaRoot;
 
@@ -264,7 +264,10 @@ class Catalyst {
 			else current = current.children[prop];
 		});
 
-		if (ret) return false;
+		if (ret) {
+			if (nearest) return current;
+			else return false;			
+		}
 		else return current;
 
 	}
@@ -842,7 +845,7 @@ class Catalyst {
 					if (_oBranch) {
 						if (_oBranch.meta) {
 							if (_oBranch.meta.top.size > 0)
-								misc.observations.push({ path: __path, value: obsOldVal, branch: _oBranch, bubble: false });
+								misc.observations.push({ path: __path, value: obsOldVal, topValue: oldValue, topPath: path, branch: _oBranch, bubble: false });
 						}
 					}
 
@@ -996,10 +999,8 @@ class Catalyst {
 
 		// Add top-level observation & enqueue all observations
 		// TODO: HIGH: major bug - this wont work as there can be observers installed above this level.
-		// TODO: HIGH: major bug - the exact path of the change, if the change is deep and the observer is at higher level that needs bubbling, is missed!
-		// TODO: HIGH: multiple changes ??
 		// TODO: HIGH, same entry is enqueued twice because flush is promise-based... 1st enqueue is from before obs installation - a problem - prolly not!
-		misc.observations.push({ path: path, value: obsOldValue, branch: oBranch, bubble: true });
+		misc.observations.push({ path: path, value: obsOldValue, topValue: obsOldValue, topPath: path, branch: oBranch, bubble: true });
 		self.enqueueObservations(misc.observations);
 		//misc.observations.push({ path: path, pathc: this.path, paths: this.paths, oldVal: obsOldValue, propOnly: false });
 		//misc.observations.forEach(obs => self.observerNotifier(obs.path, obs.pathc, obs.paths, obs.oldVal, path, obsOldValue, obs.propOnly));
@@ -1080,7 +1081,7 @@ class Catalyst {
 		else throw new Error("Expected designator(s), got " + (typeof pathObjDs) + ".");
 
 		// Set the observer
-		if (!pre) this.observers[id] = {paths, fnId, origin};
+		if (!pre) this.observers[id] = {paths, fn: fnId, origin};
 		else pre.paths.push(...paths);
 
 		// Add each path to the tree
@@ -1155,19 +1156,100 @@ class Catalyst {
 	}
 
 	enqueueObservations(observations) {
+
+		// Concealed!
 		if (this.isConcealed) return;
-		else if (this.deferObservations) this.deferredObservations.push(observations);
+		
+		// Deferred?
+		else if (this.deferObservations) this.deferredObservations.push(...observations);		
 
-		this.queuedObservations.push(observations);
-
-		if (!this.isObservationPromised) {
-			this.isObservationPromised = true;
-			Promise.resolve().then(this.flushObservations.bind(this));
+		// Normal
+		else {
+			this.queuedObservations.push(...observations);
+			
+			if (!this.isObservationPromised) {
+				this.isObservationPromised = true;
+				Promise.resolve().then(this.flushObservations.bind(this));
+			}
 		}
+
 	}
 
+	// TODO: instead of preventing firing the observer, fire it only once but with all the changes ! - batch it up!
+	// TODO: give ability to skip other observers by returning false explicitely??
+	// TODO: add top level change path!
+	// TODO: remove oldValue??? will save strigification time maybe? see if json can be avoided! in that case interceptors can be used for prev value! - problem is that in history icepts wont be triggered (as it can cause instability - validation may not be the same going backward as going backward as we have different surrounding values in different directions...), in which case apps wont be able to do any optimization from previous value! - maybe have a switch available?
 	flushObservations() {
-		console.log("Obs Flush", this.queuedObservations);
+
+		// Set promise to false
+		this.isObservationPromised = false;
+
+		// Prep
+		let symbolsCovered = {};
+		let observersCovered = {};
+
+		// Observer trigger help
+		let triggerHandler = (observerId, observation) => {
+
+			// See if we have already triggered this observer
+			if (observersCovered.hasOwnProperty(observerId)) return;
+			else observersCovered[observerId] = true;
+
+			// Fire the handler
+			let observer = this.observers[observerId];
+			if (observer) observer.fn(observation.path, observation.value, observer.origin, observation.topPath, observation.topValue);
+			else console.error("Catalyst - unknown observerId " + observerId +".");
+
+		};
+
+		// Go through each observation in order and fire the handler
+		this.queuedObservations.forEach(observation => {
+
+			// Prep
+			let oBranch = observation.oBranch;
+
+			// See if we have already fired our handlers for this path!
+			if (oBranch) {
+				if (symbolsCovered.hasOwnProperty(oBranch.symbol)) return;
+				else symbolsCovered[oBranch.symbol] = true;
+			}
+
+			// Fire each top level observer
+			if (oBranch) {
+				if (oBranch.meta) oBranch.meta.top.forEach((flag, observerId) => flag ? triggerHandler(observerId, observation) : undefined);
+			}
+
+			// Bubble up?
+			if (observation.bubble) {
+				
+				// If we dont have a branch here, we need to find the closest branch!
+				if (!oBranch) oBranch = this.getMetaBranch(observation.path, this.observerTree, true);
+
+				// If we have a branch, we would have triggered its top level handler already! - move to parent!
+				else {
+					if (oBranch.parent == oBranch) return; 
+					else oBranch = oBranch.parent;
+				}
+
+				// Fire each shallow observer
+				if (oBranch.pathLength == observation.path.length - 1) {
+					if (oBranch.meta) oBranch.meta.shallow.forEach((flag, observerId) => flag ? triggerHandler(observerId, observation) : undefined);
+					oBranch = oBranch.parent;
+				}
+
+				// Traverse upwards and fire each deep observers
+				while (true) {
+					if (oBranch.meta) oBranch.meta.deep.forEach((flag, observerId) => flag ? triggerHandler(observerId, observation) : undefined);
+
+					if (oBranch.parent == oBranch) break;
+					else oBranch = oBranch.parent;
+				}
+
+			}
+
+		});
+
+		// All done - empty the queue
 		this.queuedObservations = [];
 	}
 

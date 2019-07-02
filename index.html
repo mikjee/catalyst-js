@@ -14,9 +14,9 @@
 			// --------------------------------------------
 
 			store.a = {b:{c:{d:true, e:false}, f:{g: true}, h: true}};
-			let obs = catalyst.observe(root.a, function() { console.log(arguments); }, true, true);
+			let obs = catalyst.observe(root.a, function() { console.log("observed", ...arguments); }, true, true);
 
-			store.a.b.c.d = false;
+//			store.a.b.c.d = false;
 
 
 
