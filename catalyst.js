@@ -255,18 +255,22 @@ class Catalyst {
 		return current;
 	}
 
-	getMetaBranch(path, metaRoot, nearest = false) {
+	getMetaBranch(path, metaRoot, getNearest = false) {
 
 		let current = metaRoot;
+		let nearest = metaRoot;
 
 		let ret = path.some(prop => {
 			if (!current.children[prop]) return true;
-			else current = current.children[prop];
+			else {
+				current = current.children[prop];
+				if (current.meta) nearest = current;
+			}
 		});
 
 		if (ret) {
-			if (nearest) return current;
-			else return false;			
+			if (getNearest) return nearest;
+			else return false;
 		}
 		else return current;
 
@@ -939,15 +943,17 @@ class Catalyst {
 
 		// Retreive observer & interceptor branch - from cache is oldType is object (only object will have proxy context used for caching)
 		// TODO: add children object on proxy context to hold cache for child value-types meta branche ref??
-		let oBranch, iBranch;
+		let oBranch, iBranch, oFlag, iFlag;
 		/*if (oldType == "object") {
 			oBranch = self.cacheMetaBranch(path, self.observerTree, self.resolve(oldValue)),
 			iBranch = self.cacheMetaBranch(path, self.interceptorTree, self.resolve(oldValue));
 		}
 		else {*/
-			oBranch = self.getMetaBranch(path, self.observerTree),
-			iBranch = self.getMetaBranch(path, self.interceptorTree);
+			oBranch = self.getMetaBranch(path, self.observerTree, true),
+			iBranch = self.getMetaBranch(path, self.interceptorTree, true);
 		//}
+		oFlag = oBranch.pathLength == path.length;
+		iFlag = iBranch.pathLength == path.length;
 
 		// Fire interceptors
 		// TODO: enable this !
@@ -973,7 +979,7 @@ class Catalyst {
 			else obsOldValue = oldValue;
 
 			// Deep proxify
-			let result = self.deepProxify(value, oldValue, path, value, oldValue, path, misc, obsOldValue, oBranch, iBranch);
+			let result = self.deepProxify(value, oldValue, path, value, oldValue, path, misc, obsOldValue, oFlag ? oBranch : false, iBranch);
 
 			// Has anything been updated?
 			if (result == oldValue) {
@@ -1000,8 +1006,10 @@ class Catalyst {
 		// Add top-level observation & enqueue all observations
 		// TODO: HIGH: major bug - this wont work as there can be observers installed above this level.
 		// TODO: HIGH, same entry is enqueued twice because flush is promise-based... 1st enqueue is from before obs installation - a problem - prolly not!
-		misc.observations.push({ path: path, value: obsOldValue, topValue: obsOldValue, topPath: path, branch: oBranch, bubble: true });
-		self.enqueueObservations(misc.observations);
+		if (oBranch.meta) {
+			misc.observations.push({ path: path, value: obsOldValue, topValue: obsOldValue, topPath: path, branch: oBranch, flag: oFlag, bubble: true });
+			self.enqueueObservations(misc.observations);
+		}
 		//misc.observations.push({ path: path, pathc: this.path, paths: this.paths, oldVal: obsOldValue, propOnly: false });
 		//misc.observations.forEach(obs => self.observerNotifier(obs.path, obs.pathc, obs.paths, obs.oldVal, path, obsOldValue, obs.propOnly));
 
@@ -1206,43 +1214,39 @@ class Catalyst {
 		this.queuedObservations.forEach(observation => {
 
 			// Prep
-			let oBranch = observation.oBranch;
+			let flag = observation.flag;
+			let branch = observation.branch;
 
 			// See if we have already fired our handlers for this path!
-			if (oBranch) {
-				if (symbolsCovered.hasOwnProperty(oBranch.symbol)) return;
-				else symbolsCovered[oBranch.symbol] = true;
+			if (flag) {
+				if (symbolsCovered.hasOwnProperty(branch.symbol)) return;
+				else symbolsCovered[branch.symbol] = true;
 			}
 
 			// Fire each top level observer
-			if (oBranch) {
-				if (oBranch.meta) oBranch.meta.top.forEach((flag, observerId) => flag ? triggerHandler(observerId, observation) : undefined);
-			}
-
+			if (flag) branch.meta.top.forEach((enabledFlag, observerId) => enabledFlag ? triggerHandler(observerId, observation) : undefined);
+			
 			// Bubble up?
 			if (observation.bubble) {
-				
-				// If we dont have a branch here, we need to find the closest branch!
-				if (!oBranch) oBranch = this.getMetaBranch(observation.path, this.observerTree, true);
 
-				// If we have a branch, we would have triggered its top level handler already! - move to parent!
-				else {
-					if (oBranch.parent == oBranch) return; 
-					else oBranch = oBranch.parent;
+				// If we have an exact branch, we would have triggered its top level handler already! - move to parent!
+				if (flag) {
+					if (branch.parent == branch) return; 
+					else branch = branch.parent;
 				}
 
 				// Fire each shallow observer
-				if (oBranch.pathLength == observation.path.length - 1) {
-					if (oBranch.meta) oBranch.meta.shallow.forEach((flag, observerId) => flag ? triggerHandler(observerId, observation) : undefined);
-					oBranch = oBranch.parent;
+				if (branch.pathLength == observation.path.length - 1) {
+					if (branch.meta) branch.meta.shallow.forEach((enabledFlag, observerId) => enabledFlag ? triggerHandler(observerId, observation) : undefined);
+					branch = branch.parent;
 				}
 
 				// Traverse upwards and fire each deep observers
 				while (true) {
-					if (oBranch.meta) oBranch.meta.deep.forEach((flag, observerId) => flag ? triggerHandler(observerId, observation) : undefined);
+					if (branch.meta) branch.meta.deep.forEach((enabledFlag, observerId) => enabledFlag ? triggerHandler(observerId, observation) : undefined);
 
-					if (oBranch.parent == oBranch) break;
-					else oBranch = oBranch.parent;
+					if (branch.parent == branch) break;
+					else branch = branch.parent;
 				}
 
 			}
