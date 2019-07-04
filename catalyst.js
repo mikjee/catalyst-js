@@ -55,7 +55,7 @@ class Catalyst {
 		// PREP
 		// ----
 
-		this.accessor = ".";											// PUBLIC:
+		this.accessor = ".";												// PUBLIC:
 		this.isBypassed = false;											// PUBLIC:
 		this.resolveMode = false;											// PRIVATE:
 		this.resolveContext = false;										// PRIVATE:
@@ -70,20 +70,15 @@ class Catalyst {
 		this.observerTree = { metaName: "observer", children: {} };
 		this.observerTree.parent = this.observerTree;
 		this.observers = {};												// PRIVATE:
-		//this.observed = {prop: {}, child:{}, deep: {}};						// PRIVATE:
+		//this.observed = {prop: {}, child:{}, deep: {}};					// PRIVATE:
 		this.observeAsync = true;											// PUBLIC: Whether observers are triggered asynchronously (via Promise microtask) !
-		this.deferObservations = 0;											// PUBLIC: Whether observations are batched together!
-		this.isObservationPromised = false;
-		this.queuedObservations = [];
-		this.deferredObservations = [];
-		/*this.observations = {												// PRIVATE:
-			stacks: [],		// Array of maps
-			paths: {}		// paths to stack index
-		};*/
+		this.isObservationPromised = false;									// PRIVATE:
+		this.observations = [];												// PRIVATE:
+		this.detailedObservations = true;									// PUBLIC: cannot be changed once initialized!
 
 		// Interceptor - supports cascading changes to the store and are auto-batched to be atomic! They are not executed on undo/redo!
-		this.interceptorTree = { metaName: "interceptor", children: {} };
-		this.interceptorTree.parent = this.interceptorTree;
+		this.interceptorTree = { metaName: "interceptor", children: {} };	// PRIVATE:
+		this.interceptorTree.parent = this.interceptorTree;					// PRIVATE:
 		this.interceptors = {};												// PRIVATE:
 		this.intercepted = {prop: {}, child:{}, deep: {}};					// PRIVATE:
 		this.interceptorNotifier = this.notifyInterceptors.bind(this);		// PRIVATE:
@@ -118,29 +113,6 @@ class Catalyst {
 			getObserveAsync = () => this.observeAsync,
 			setObserveAsync = value => this.observeAsync = value,
 
-			getObserveDeffered = () => this.deferObservations,
-			setObserveDeffered = value => {
-				if (typeof value == "number") {
-					if (value > this.observeDeffered) {
-						if (this.observeDeffered == 0) this.deferObservers();
-					}
-					else if (value < this.observeDeffered) {
-						if (value < 0) value = 0;
-						if (this.observeDeffered > 0)
-							while (this.observeDeffered > value)
-								this.resumeObservers();
-					}
-				}
-				else if (value) {
-					if (!this.observeDeffered) this.deferObservers();
-				}
-				else {
-					if (this.observeDeffered)
-						while (this.observeDeffered > 0)
-							this.resumeObservers();
-				}
-			},
-
 			getIsConcealed = () => this.isConcealed,
 			setIsConcealed = value => this.isConcealed = value,
 
@@ -155,7 +127,6 @@ class Catalyst {
 
 		// TODO: write parsable comments on functions and purpose of variables - also mark if they are to be used by user or internal only!
 		// TODO: must have ability to add functions to the store! like ToJSON etc. Esp to areas not recorded !
-		// TODO: ObserveAsync is not working - always sync!
 
 		// Get context
 		let internal = this;
@@ -163,7 +134,7 @@ class Catalyst {
 		// Access to controllers
 		this.catalyst = {
 
-			__internal: internal,
+			$$internal: internal,
 
 			get accessor() { return getAccessor(); },
 
@@ -194,33 +165,10 @@ class Catalyst {
 			observe: this.metaProxify(function (pathOrObject, fn, children = false, deep = false, init = true)
 					{ return this.observe(pathOrObject, fn, children, deep, init, this.catalyst); }, this),
 			stopObserve: this.stopObserve.bind(this),
-			deferObservers: this.deferObservers.bind(this),
-			resumeObservers: this.resumeObservers.bind(this),
 			refresh: this.metaProxify(this.refresh, this),
-			curtain: (function (fn, async) {
-				this.deferObservers();
-				let result = fn();
-
-				let oldAsync = this.observeAsync;
-				if (async === true) this.observeAsync = true;
-				else if (async === false) this.observeAsync = false;
-				this.resumeObservers();
-				this.observeAsync = oldAsync;
-
-				return result;
-			}).bind(this),
-			conceal: (function (fn) {
-				this.isConcealed = true;
-				let result = fn();
-				this.isConcealed = false;
-				return result;
-			}).bind(this),
 
 			get isObserveAsync() { return getObserveAsync(); },
 			set isObserveAsync(value) { setObserveAsync(value); },
-
-			get isdeferObservations() { return getObserveDeffered(); },
-			set isdeferObservations(value) { setObserveDeffered(value); },
 
 			get isConcealed() { return getIsConcealed(); },
 			set isConcealed(value) { setIsConcealed(value); },
@@ -669,10 +617,10 @@ class Catalyst {
 
 	}
 
-	deepProxify(_value, _oldValue, _path, value, oldValue, path, misc, obsOldValue, oBranch, iBranch) {
+	deepProxify(_value, _oldValue, _path, value, oldValue, path, misc, oBranch, iBranch) {
 
 		// Diff check
-		if (_value == _oldValue) return _oldValue;
+		if (_value === _oldValue) return _oldValue;
 
 		// Prep
 		let _isObj = typeof _value == "object";
@@ -747,7 +695,7 @@ class Catalyst {
 			// Diff helper
 			// TODO: uses double equals instead of triple equals - add test case for objects deep change!
 			let diff = (n, o, r, k) => {
-				if (n == o) {
+				if (n === o) {
 					if (!preserveRef) r[k] = o;
 					return false;
 				}
@@ -761,7 +709,6 @@ class Catalyst {
 				let newVal = _isObj ? _value[key] : undefined;
 				let oldVal = _isOldObj ? _oldValue[key] : undefined;
 				let isOldValObj = typeof oldVal == "object";
-				let obsOldVal = _isOldObj ? obsOldValue[key] : undefined;
 
 				// Diff
 				if (!diff(newVal, oldVal, root, key)) return;
@@ -795,7 +742,7 @@ class Catalyst {
 
 					// newValue is object, this property wont get deleted but updated - must recursively proxify this!
 					if (typeof newVal == "object") {
-						root[key] = this.deepProxify(newVal, oldVal, __path, value, oldValue, path, misc, obsOldVal, _oBranch, _iBranch);
+						root[key] = this.deepProxify(newVal, oldVal, __path, value, oldValue, path, misc, _oBranch, _iBranch);
 						if (!isOldValObj) misc.changes ++;
 						executeDeletes();
 					}
@@ -805,7 +752,7 @@ class Catalyst {
 
 						// if oldVal was an object, must recurse into subtrees to get unanimity!
 						if (isOldValObj) {
-							let remnant = this.deepProxify(undefined, oldVal, __path, value, oldValue, path, misc, obsOldVal, _oBranch, _iBranch);
+							let remnant = this.deepProxify(undefined, oldVal, __path, value, oldValue, path, misc, _oBranch, _iBranch);
 
 							if (typeof remnant != "undefined") {
 								root[key] = remnant;
@@ -824,7 +771,7 @@ class Catalyst {
 
 						// if oldVal was an object, must recurse into subtrees to get unanimity!
 						if (isOldValObj) {
-							let remnant = this.deepProxify(undefined, oldVal, __path, value, oldValue, path, misc, obsOldVal, _oBranch, _iBranch);
+							let remnant = this.deepProxify(undefined, oldVal, __path, value, oldValue, path, misc, _oBranch, _iBranch);
 
 							if (typeof remnant != "undefined") root[key] = remnant;
 							else {
@@ -849,7 +796,7 @@ class Catalyst {
 					if (_oBranch) {
 						if (_oBranch.meta) {
 							if (_oBranch.meta.top.size > 0)
-								misc.observations.push({ path: __path, value: obsOldVal, topValue: oldValue, topPath: path, branch: _oBranch, bubble: false });
+								misc.observations.push({ path: __path, branch: _oBranch, bubble: false });
 						}
 					}
 
@@ -908,7 +855,7 @@ class Catalyst {
 
 	}
 
-	handleSet(target, prop, value, proxy) {
+	handleSet(target, prop, value) {
 
 		// Check if this is an isolated non-state disconnected reference OR if we are bypassing and setting the props direct
 		if (this.passthrough || this.self.isBypassed) {
@@ -919,12 +866,10 @@ class Catalyst {
 		}
 
 		// Check diff
-		if (target[prop] == value) return true;
+		if (target[prop] === value) return true;
 
 		// Prep
 		let self = this.self;
-		let obsOldValue;
-
 		let oldValue = target[prop];
 		let oldType = typeof oldValue;
 		let misc = {
@@ -941,77 +886,43 @@ class Catalyst {
 			path.push(prop);
 		}
 
-		// Retreive observer & interceptor branch - from cache is oldType is object (only object will have proxy context used for caching)
-		// TODO: add children object on proxy context to hold cache for child value-types meta branche ref??
-		let oBranch, iBranch, oFlag, iFlag;
-		/*if (oldType == "object") {
-			oBranch = self.cacheMetaBranch(path, self.observerTree, self.resolve(oldValue)),
-			iBranch = self.cacheMetaBranch(path, self.interceptorTree, self.resolve(oldValue));
-		}
-		else {*/
-			oBranch = self.getMetaBranch(path, self.observerTree, true),
-			iBranch = self.getMetaBranch(path, self.interceptorTree, true);
-		//}
-		oFlag = oBranch.pathLength == path.length;
-		iFlag = iBranch.pathLength == path.length;
+		// Retreive observer & interceptor branch
+		let oBranch = self.getMetaBranch(path, self.observerTree, true),
+			iBranch = self.getMetaBranch(path, self.interceptorTree, true),
+			oFlag = oBranch.pathLength == path.length,
+			iFlag = iBranch.pathLength == path.length;
 
 		// Fire interceptors
 		// TODO: enable this !
-		// TODO: how escape interceptor chain? - for example for making a catalyst-readonly plugin!
-		try { /*value = self.interceptorNotifier(path, this.path, this.paths, value, oldValue, path, value);*/ }
-		catch (e) {
-			console.error("Discard update (" + path + ") - encountered error!", e);
-			return false;
-		}
+		/*value = self.interceptorNotifier(path, this.path, this.paths, value, oldValue, path, value);*/
 
 		// Check diff again
-		if (value == oldValue) return true;
+		if (value === oldValue) return true;
 
-		// Set the new value!
-		try {
+		// Deep proxify
+		let result = self.deepProxify(value, oldValue, path, value, oldValue, path, misc, oFlag ? oBranch : false, iBranch);
 
-			// Prep old JSON string - if we are doing o -> o
-			let oldJSON;
-			if (oldType == "object") oldJSON = JSON.stringify(oldValue);
+		// Has anything been updated?
+		if (result === oldValue) {
 
-			// Note obsOldValue
-			if (oldType == "object") obsOldValue = JSON.parse(oldJSON);
-			else obsOldValue = oldValue;
-
-			// Deep proxify
-			let result = self.deepProxify(value, oldValue, path, value, oldValue, path, misc, obsOldValue, oFlag ? oBranch : false, iBranch);
-
-			// Has anything been updated?
-			if (result == oldValue) {
-
-				// In case of o -> o, we check hasChanged, if no changes are found we exit.
-				if (typeof result == "object") {
-					if (misc.changes == 0) return true;
-					// else is omitted as it means changes have happened inside the object but not at this top level !
-				}
-
-				// for everything else, it means nothing changed!
-				else return true;
-
+			// For o -> o, check number of changes, if none then exit.
+			if (typeof result == "object") {
+				if (misc.changes == 0) return true; 
+				// Else is not required - as it means changes have happened inside the object but not at this top level !
 			}
-			else if (typeof result == "undefined") delete target[prop];
-			else target[prop] = result;
+
+			// Nothing changed!
+			else return true;
 
 		}
-		catch(e) {
-			console.error("Discard update (" + path + ") - encountered error!", e);
-			return false;
-		}
+		else if (typeof result == "undefined") delete target[prop];
+		else target[prop] = result;
 
-		// Add top-level observation & enqueue all observations
-		// TODO: HIGH: major bug - this wont work as there can be observers installed above this level.
-		// TODO: HIGH, same entry is enqueued twice because flush is promise-based... 1st enqueue is from before obs installation - a problem - prolly not!
+		// Add top-level observation & enqueue all child observations
 		if (oBranch.meta) {
-			misc.observations.push({ path: path, value: obsOldValue, topValue: obsOldValue, topPath: path, branch: oBranch, flag: oFlag, bubble: true });
+			misc.observations.push({ path: path, branch: oBranch, haveExactBranch: oFlag, bubble: true });
 			self.enqueueObservations(misc.observations);
 		}
-		//misc.observations.push({ path: path, pathc: this.path, paths: this.paths, oldVal: obsOldValue, propOnly: false });
-		//misc.observations.forEach(obs => self.observerNotifier(obs.path, obs.pathc, obs.paths, obs.oldVal, path, obsOldValue, obs.propOnly));
 
 		// All done
 		return true;
@@ -1089,11 +1000,11 @@ class Catalyst {
 		else throw new Error("Expected designator(s), got " + (typeof pathObjDs) + ".");
 
 		// Set the observer
-		if (!pre) this.observers[id] = {paths, fn: fnId, origin};
+		if (!pre) this.observers[id] = {paths, fn: fnId, origin, symbolsMap: {}};
 		else pre.paths.push(...paths);
 
 		// Add each path to the tree
-		paths.forEach(path => {
+		paths.forEach((path, i) => {
 
 			// Create tree branch
 			let branch = this.ensureMetaBranch(path, this.observerTree, () => { return {
@@ -1102,6 +1013,9 @@ class Catalyst {
 				deep: new Map(),
 				count: 0
 			}; });
+
+			// Map the branch path to the array index of the path in the observer definition (used for path-respective diff)
+			if (this.detailedObservations) this.observers[id].symbolsMap[branch.symbol] = (this.observers[id].paths.length - paths.length) + i;
 
 			// Add leaf to branch
 			branch.meta.top.set(id, true);
@@ -1166,14 +1080,11 @@ class Catalyst {
 	enqueueObservations(observations) {
 
 		// Concealed!
-		if (this.isConcealed) return;
-		
-		// Deferred?
-		else if (this.deferObservations) this.deferredObservations.push(...observations);		
+		if (this.isConcealed) return;	
 
 		// Normal
 		else {
-			this.queuedObservations.push(...observations);
+			this.observations.push(...observations);
 			
 			if (!this.isObservationPromised) {
 				this.isObservationPromised = true;
@@ -1183,67 +1094,100 @@ class Catalyst {
 
 	}
 
-	// TODO: instead of preventing firing the observer, fire it only once but with all the changes ! - batch it up!
 	// TODO: give ability to skip other observers by returning false explicitely??
-	// TODO: add top level change path!
-	// TODO: remove oldValue??? will save strigification time maybe? see if json can be avoided! in that case interceptors can be used for prev value! - problem is that in history icepts wont be triggered (as it can cause instability - validation may not be the same going backward as going backward as we have different surrounding values in different directions...), in which case apps wont be able to do any optimization from previous value! - maybe have a switch available?
 	flushObservations() {
 
 		// Set promise to false
 		this.isObservationPromised = false;
 
 		// Prep
-		let symbolsCovered = {};
-		let observersCovered = {};
+		let topSymbolsCovered = {}, shallowSymbolsCovered = {}, deepSymbolsCovered = {};
+		let observersCovered = new Map();
 
-		// Observer trigger help
-		let triggerHandler = (observerId, observation) => {
+		// Observer processor
+		let processObservation = (observerId, observation, branch) => {
 
-			// See if we have already triggered this observer
-			if (observersCovered.hasOwnProperty(observerId)) return;
-			else observersCovered[observerId] = true;
-
-			// Fire the handler
+			// Prep
 			let observer = this.observers[observerId];
-			if (observer) observer.fn(observation.path, observation.value, observer.origin, observation.topPath, observation.topValue);
-			else console.error("Catalyst - unknown observerId " + observerId +".");
+			let coveredObserver;
+
+			// Are we encountering this observer for the first time?
+			if (!observersCovered.has(observerId)) {
+
+				// Create a detailed object?
+				if (this.detailedObservations) coveredObserver = {
+						fn: observer.fn,
+						origin: observer.origin,
+						paths: new Array(observer.paths.length)
+					};
+				else coveredObserver = observer;
+
+				// Add the observer covered to our list
+				observersCovered.set(observerId, coveredObserver);
+
+			}
+
+			// Add observation details?
+			if (this.detailedObservations) {
+				coveredObserver = coveredObserver || observersCovered.get(observerId);
+				let symbolIndex = observer.symbolsMap[branch.symbol];
+				coveredObserver.paths[symbolIndex] = observation.path;
+			}
 
 		};
 
-		// Go through each observation in order and fire the handler
-		this.queuedObservations.forEach(observation => {
+		// Go through each observation in order and process them (batch the diffs)
+		this.observations.forEach(observation => {
 
 			// Prep
-			let flag = observation.flag;
+			let haveExactBranch = observation.haveExactBranch;
 			let branch = observation.branch;
 
-			// See if we have already fired our handlers for this path!
-			if (flag) {
-				if (symbolsCovered.hasOwnProperty(branch.symbol)) return;
-				else symbolsCovered[branch.symbol] = true;
-			}
-
 			// Fire each top level observer
-			if (flag) branch.meta.top.forEach((enabledFlag, observerId) => enabledFlag ? triggerHandler(observerId, observation) : undefined);
+			if (haveExactBranch) {
+				if (!topSymbolsCovered.hasOwnProperty(branch.symbol)) {
+					topSymbolsCovered[branch.symbol] = true;
+					branch.meta.top.forEach((isEnabled, observerId) => isEnabled ? processObservation(observerId, observation, branch) : undefined);
+				}
+			}
 			
 			// Bubble up?
 			if (observation.bubble) {
 
 				// If we have an exact branch, we would have triggered its top level handler already! - move to parent!
-				if (flag) {
+				if (haveExactBranch) {
 					if (branch.parent == branch) return; 
 					else branch = branch.parent;
 				}
 
 				// Fire each shallow observer
 				if (branch.pathLength == observation.path.length - 1) {
-					if (branch.meta) branch.meta.shallow.forEach((enabledFlag, observerId) => enabledFlag ? triggerHandler(observerId, observation) : undefined);
+					
+					if (branch.meta) {
+						if (!shallowSymbolsCovered.hasOwnProperty(branch.symbol)) {
+							shallowSymbolsCovered[branch.symbol] = true;
+							branch.meta.shallow.forEach((isEnabled, observerId) => isEnabled ? 
+								processObservation(observerId, observation, branch) : 
+								undefined
+							);
+						}
+					}
+
+					// Go up to deep levels
 					branch = branch.parent;
 				}
 
 				// Traverse upwards and fire each deep observers
 				while (true) {
-					if (branch.meta) branch.meta.deep.forEach((enabledFlag, observerId) => enabledFlag ? triggerHandler(observerId, observation) : undefined);
+					if (branch.meta) {
+						if (!deepSymbolsCovered.hasOwnProperty(branch.symbol)) {
+							deepSymbolsCovered[branch.symbol] = true;
+							branch.meta.deep.forEach((isEnabled, observerId) => isEnabled ? 
+								processObservation(observerId, observation, branch) : 
+								undefined
+							);
+						}
+					}
 
 					if (branch.parent == branch) break;
 					else branch = branch.parent;
@@ -1253,158 +1197,14 @@ class Catalyst {
 
 		});
 
+		// Triger every handler in order
+		observersCovered.forEach((processedObs, obsId) => {
+			if (!this.observers[obsId]) return;
+			processedObs.fn(processedObs.paths, processedObs.origin);
+		});
+
 		// All done - empty the queue
-		this.queuedObservations = [];
-	}
-
-	// TODO: ths is no longer in use
-	notifyObservers(path, pathc, paths, oldVal, path_, oldVal_, propOnly = false, overrideDefer = false) {
-
-		if (this.isConcealed) return;
-
-		// Are we deferining ? - If yes then save this to the topmost deferred stack!
-		if ((this.deferObservations > 0) && !overrideDefer) {
-
-			// If the path already exists in an observation, update that observation! NOTE: propOnly minimizes the scope of the observers selected, hence it is AND-ed!
-			let stackIndex = this.observations.paths[path];
-			if (typeof stackIndex != "undefined") {
-
-				// get the old obs
-				let obs = this.observations.stacks[stackIndex].get(path);
-
-				// Delete the old ops from it's stack
-				this.observations.stacks[stackIndex].delete(path)
-
-				// Update the path to point to the current stack!
-				this.observations.paths[path] = this.deferObservations - 1;
-
-				// Put the new ops in the current stack!
-				this.observations.stacks[this.deferObservations - 1].set(path, {
-					path,
-					pathc: pathc || obs.pathc,
-					paths: paths || obs.paths,
-					oldVal: obs.oldVal,
-					path_,
-					oldVal_,
-					propOnly: obs.propOnly && propOnly
-				});
-
-			}
-
-			// Path is not already observed!
-			else {
-
-				// Add new path pointing to the current stack!
-				this.observations.paths[path] = this.deferObservations - 1;
-
-				// Add the observation to the current stack
-				this.observations.stacks[this.deferObservations - 1].set(path, {path, pathc, paths, oldVal, path_, oldVal_, propOnly});
-
-			}
-
-		}
-
-		// Not deferring or defer overriden!
-		else {
-
-			// Helper
-			let notify = id => {
-
-				let observer = this.observers[id];
-				let actual = () => observer.fn(
-					path.substr(observer.origin.fragmentPath.length),
-					oldVal,
-					observer.origin,
-					path_,
-					oldVal_
-				);
-
-				if (this.observeAsync) Promise.resolve(true).then(() => actual());
-				else actual();
-
-			};
-
-			// Notify Observers - Prop
-			if (this.observed["prop"][path])
-				for (var id of this.observed["prop"][path].keys())
-					notify(id);
-
-			// Notify child and deep observers?
-			if (!propOnly) {
-
-				// Notify Observers - Child
-				if (this.observed["child"][pathc])
-					for (var id of this.observed["child"][pathc].keys())
-						notify(id);
-
-				// Notify Observers - Deep
-				for (var count = paths.length - 1; count >= 0; count --)
-					if (this.observed["deep"][paths[count]])
-						for (var id of this.observed["deep"][paths[count]].keys())
-							notify(id);
-
-			}
-
-		}
-
-	}
-
-	/**
-	* Defers all observer callbacks. Stackable.
-	*/
-	deferObservers() {
-
-		// Create new stack!
-		this.observations.stacks.push(new Map());
-
-		// Increase count
-		this.deferObservations ++;
-
-	}
-
-	/**
-	* Stops deferring observers and invokes deffered callbacks. Stackable.
-	* @param {boolean} all - If true, invokes callbacks from all stacked defers.
-	*/
-	resumeObservers(all = false) {
-
-		// Check
-		if (this.deferObservations == 0) return;
-
-		// Decrement
-		this.deferObservations --;
-
-		// Prep
-		let arr = [];
-		let stackIndex = all ? 0 : this.deferObservations;
-
-		// For each stack
-		while (stackIndex <= this.deferObservations) {
-
-			// Publish
-			this.observations.stacks[stackIndex].forEach(obs => {
-				delete this.observations.paths[obs.path];
-				this.observerNotifier(
-					obs.path,
-					obs.pathc,
-					obs.paths,
-					obs.oldVal,
-					obs.path_,
-					obs.oldVal_,
-					obs.propOnly,
-					true
-				);
-			});
-
-			// Update
-			stackIndex ++;
-
-		}
-
-		// Update stack
-		if (all) this.observations.stacks = [];
-		else this.observations.stacks.pop();
-
+		this.observations = [];
 	}
 
 	/**
@@ -1553,6 +1353,7 @@ class Catalyst {
 
 	}
 
+	// TODO: how to escape interceptor chain? - for example for making a catalyst-readonly plugin (solved) - how to escape without returning oldval???
 	notifyInterceptors(path, pathc, paths, newVal, oldVal, path_, newVal_, propOnly = false, requireDiff = true) {
 
 		// Helper
