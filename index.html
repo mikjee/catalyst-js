@@ -14,7 +14,7 @@
 
 			store.a = {b:{c:{d:true, e:false}, f:{g: true}, h: true}};
 			
-			let obs1 = catalyst.observe(
+			/*let obs1 = catalyst.observe(
 				[
 					root.a.b.c,
 					root.a.b.f
@@ -41,20 +41,51 @@
 				
 				true, 
 				true
-			);
-
-			// --------------------------------------------
+			);*/
 
 			//store.a.b.c.d = 2;
 			//store.a.b.f.g = 3;
+
+			// --------------------------------------------
+
+			
+			let history = [{forward: [], backward: []}];
+			let parse = path => path.reduce((current, prop) => current[prop], store);
+			
+			/*store.a = { b: { c: 1 } };
+			let fn = () => store.a.b.c++;*/
+			
+			// Note we are only stringifying - the parsing will be done later at runtime - saving us some time?
+			// TODO: need to batch multiple updates to the same path - use a permanent store structure tree for path??
+			catalyst.intercept(root, (path, value) => {
+
+				let old = parse(path);
+				let isOldObj = (typeof old === "object");
+				if (isOldObj) old = JSON.stringify(old);				// TODO: This is damn slow!!
+				history[history.length - 1].backward.push({ path, value: old, flag: isOldObj });
+
+				/*let val = value;
+				let isObj = (typeof val === "object");
+				if (isObj) val = JSON.stringify(val);					// TODO: This is damn slow!!				
+				history[history.length - 1].forward.push({path, value: val, flag: isObj});*/
+
+				return value;
+
+			}, true, true);
+
+			catalyst.observe(root, () => {
+				// TODO: move the logic for recording the forward values here instead of in the itnerceptor? use the paths to parse and record!
+				// TODO: or use a logic of ALL recordings ONLY in the observer (move all stringification to the obs) - logic of intermediate vals
+				history.push({ forward: [], backward: [] });
+			}, true, true);
 
 			// --------------------------------------------
 			
 			// Icept + Obs-Enqueue
 			performance.mark("test");
 			for (var i = 0; i < 100000; i++) {
-				store.a.b.c.d = i;
-				store.a.b.f.g = i;
+				store.a.b.c.d = {i};
+				//store.a.b.f.g = {i};
 			}
 			performance.measure("test", "test");
 
