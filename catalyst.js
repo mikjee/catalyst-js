@@ -10,27 +10,67 @@
 // Copyright (c) 2019 Soumik Chatterjee (github.com/badguppy) (soumik.chat@hotmail.com)
 // MIT License
 
-// TODO: add ability to prep the designator
-let designator = new Proxy(
-	() => [],
-	{
-		get: (_, prop) => {
+// ---------------------------
+// DESIGNATOR
+// ---------------------------
 
-			let env = { path: [prop] };
-			let resolver = function() { return this.path; };
-			let getter = function (_, prop, proxy) {
-				this.path.push(prop);
-				return proxy;
-			};
+let designatorHOC = init => {
 
-			return new Proxy(
-				resolver.bind(env),
-				{ get: getter.bind(env) }
-			);
-
-		}
+	if (init) {
+		if (typeof init === "function") init = init();
+		if (!Array.isArray(init)) throw new Error("Designator expects array or another designator for prepping, got " + typeof init + ".");
 	}
-);
+
+	return new Proxy(
+
+		path => {
+			if (!path) return init || [];
+			else {
+				if (path === true) return designatorHOC(init ? init.slice() : []);
+				else if (typeof path === "function") path = path();
+
+				if (!Array.isArray(path)) throw new Error("Designator expects array or another designator for prepping, got " + typeof path + ".");
+				return designatorHOC(init ? [...init, ...path] : path.slice());
+			}
+		},
+		
+		{
+			get: (_, prop) => {
+
+				let env = { path: init ? [...init, prop] : [prop] };
+
+				let resolver = function (path) { 
+					if (!path) return this.path;
+					else {
+						if (path === true) return designatorHOC(this.path.slice());
+						else if (typeof path === "function") path = path();
+
+						if (!Array.isArray(path)) throw new Error("Designator expects array or another designator for prepping, got " + typeof path + ".");
+						return designatorHOC([...this.path, ...path]);
+					}
+				};
+				
+				let getter = function (_, prop, proxy) {
+					this.path.push(prop);
+					return proxy;
+				};
+
+				return new Proxy(
+					resolver.bind(env),
+					{ get: getter.bind(env) }
+				);
+
+			} 
+		}
+
+	);
+}
+
+let designator = designatorHOC();
+
+// ---------------------------
+// CATALYST
+// ---------------------------
 
 class Catalyst {
 
@@ -44,6 +84,9 @@ class Catalyst {
 	* @param {Object} obj - The base object to create the store from.
 	* @returns {Object} The state store.
 	*/
+
+	// TODO: write parsable comments on functions and purpose of variables - also mark if they are to be used by user or internal only!
+	// TODO: must have ability to add functions to the store! like ToJSON etc. Esp to areas not recorded !
 	constructor(obj) {
 
 		// Check - cannot create store with array as base!
@@ -56,29 +99,20 @@ class Catalyst {
 		// PREP
 		// ----
 
-		this.accessor = ".";												// PUBLIC:
-		this.isBypassed = false;											// PUBLIC:
 		this.resolveMode = false;											// PRIVATE:
 		this.resolveContext = false;										// PRIVATE:
-		this.preserveReferences = true;										// PUBLIC: TODO: should prolly be false always to trigger react update - reference should be broken all along from bottom to the highest possible level of change to force update at that heirarchy of component?
-		this.preserveFragments = true;										// PUBLIC:
+		this._uCounter = 0;													// PRIVATE:
 
-		// Fragments - creates top-level-like state-chunks that preserve the reference to the main chunk.
-		this.fragmented = {};
-		this.fragments = {};
-
-		// Observer - does NOT support cascading changes to the store.
+		// Observer prep
 		this.observerTree = this.createMetaRoot();							// PRIVATE:
 		this.observers = {};												// PRIVATE:
 		this.isObservationPromised = false;									// PRIVATE:
 		this.observations = [];												// PRIVATE:
-		this.detailedObservations = true;									// PUBLIC: cannot be changed once initialized!
+		this.detailedObservations = false;									// PUBLIC: cannot be changed once initialized!
 
-		// Interceptor - supports cascading changes to the store and are auto-batched to be atomic! They are not executed on undo/redo!
+		// Interceptor prep
 		this.interceptorTree = this.createMetaRoot();						// PRIVATE:
 		this.interceptors = {};												// PRIVATE:
-		this.setterLevel = 0;												// PRIVATE:
-		this.setterBatched = false;											// PRIVATE:
 
 		// STORE CREATION
 		// ----
@@ -93,28 +127,6 @@ class Catalyst {
 		// CONTROLLER CREATION
 		// ---
 
-		// Prep catalyst controllers
-		let getIsBypassed = () => this.isBypassed,
-			setIsBypassed = value => this.isBypassed = value,
-
-			getPreserveReferences = () => this.preserveReferences,
-			setPreserveReferences = value => this.preserveReferences = value,
-
-			/*getPreserveFragments = () => this.preserveFragments,
-			setPreserveFragments = value => this.preserveFragments = value,*/
-
-			getStore = () => this.store
-
-			/*getIsFragment = function(pathOrObject) {
-				if (typeof pathOrObject == "undefined") return 0;
-				else if (typeof pathOrObject == "object") return this.isFragment(pathOrObject);
-				else if (typeof pathOrObject == "string") return this.isFragment(pathOrObject);
-				else throw new Error("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
-			}*/;
-
-		// TODO: write parsable comments on functions and purpose of variables - also mark if they are to be used by user or internal only!
-		// TODO: must have ability to add functions to the store! like ToJSON etc. Esp to areas not recorded !
-
 		// Get context
 		let internals = this;
 
@@ -122,40 +134,16 @@ class Catalyst {
 		this.catalyst = {
 
 			internals,
+			get store() { return internals.store; },
 
-			get isBypassed() { return getIsBypassed(); },
-			set isBypassed(value) { setIsBypassed(value); },
-
-			get preserveReferences() { return getPreserveReferences(); },
-			set preserveReferences(value) { setPreserveReferences(value); },
-
-			/*get preserveFragments() { return getPreserveFragments(); },
-			set preserveFragments(value) { setPreserveFragments(value); },*/
-
-			bypass: (function (fn) {
-				this.isBypassed = true;
-				let result = fn();
-				this.isBypassed = false;
-				return result;
-			}).bind(this),
-
-			parse: this.parse.bind(this),
 			path: this.path.bind(this),
 			parent: this.parent.bind(this),
-			/*fragment: this.metaProxify(this.fragment, this),
-			isFragment: this.metaProxify(getIsFragment, this),
-			get fragmentPath() { return ""; },
-			augment: this.metaProxify(this.augment, this),*/
 
-			observe: this.metaProxify(function (pathOrObject, fn, children = false, deep = false, init = true)
-					{ return this.observe(pathOrObject, fn, children, deep, init, this.catalyst); }, this),
+			observe: this.observe.bind(this),
 			stopObserve: this.stopObserve.bind(this),
 
-			intercept: this.metaProxify(function (pathOrObject, fn, children = false, deep = false)
-						{ return this.intercept(pathOrObject, fn, children, deep, this.catalyst); }, this),
-			stopIntercept: this.stopIntercept.bind(this),
-
-			get store() { return getStore(); }
+			intercept: this.intercept.bind(this),
+			stopIntercept: this.stopIntercept.bind(this)			
 
 		};
 
@@ -169,7 +157,7 @@ class Catalyst {
 	// ---------------------------
 
 	createMetaRoot() {
-		let metaRoot = { children: {}, pathLength: 0 };
+		let metaRoot = { children: {}, symbol: Symbol(''), pathLength: 0 };
 		metaRoot.parent = metaRoot;
 		return metaRoot;
 	}
@@ -238,267 +226,8 @@ class Catalyst {
 	}
 
 	// ---------------------------
-	// FRAGMENTATION METHODS
-	// ---------------------------
-
-	/**
-	* Takes a part of the store and returns if that part has any fragments.
-	* @param {Object|string} pathOrObject - An object reference or a string path that represents any part of the store.
-	* @returns {number} The number of fragments.
-	*/
-	isFragment(pathOrObject) {
-
-		// Prep path
-		let path;
-		if (typeof pathOrObject == "object") path = this.path(pathOrObject);
-		else if (typeof pathOrObject == "string") path = pathOrObject;
-		else throw new Error("Expected string or object, got " + (typeof pathOrObject) + ".");
-
-		// Sanitize propertypath
-		if (!path.length) return 0;
-		if (path[0] != this.accessor) path = this.accessor + path;
-
-		// Return if fragment
-		return (typeof this.fragmented[path] == "object") ? Object.keys(this.fragmented[path]).length : 0;
-
-	}
-
-	/**
-	* Creates a new fragment, which freezes reference and allows relative access to the given part of the state.
-	* @param {Object|string} pathOrObject - An object reference or a string path that represents any object/array part of the store.
-	* @param {dissolveCB} onDissolve - Invoked when the fragment is dissolved. Can be used for external clean-up. Do NOT update the store here!
-	* @returns {Object} A new fragment object.
-	*/
-	fragment(pathOrObject, onDissolve) {
-
-		// Prep path
-		let path;
-		if (typeof pathOrObject == "object") path = this.path(pathOrObject);
-		else if (typeof pathOrObject == "string") path = pathOrObject;
-		else throw new Error("Expected string or object, got " + (typeof pathOrObject) + ".");
-
-		// Sanitize propertypath
-		if (!path.length) throw new Error("Path is an empty string.");
-		if (path[0] != this.accessor) path = this.accessor + path;
-
-		// Check if path exists and is an object
-		let store = this.parse(path);
-		if (typeof store != "object") throw new Error("Path must represent an existing valid part of the store.");
-
-		// Create ID
-		this._fragCounter = (this._fragCounter || 1) + 1;
-		let id = this._fragCounter;
-
-		// Populate new fragment
-		let internal = { observers: [], interceptors: [] };
-		let fragment = {
-
-			catalyst: this.catalyst,
-
-			stopObserve: this.stopObserve.bind(this),
-			stopIntercept: this.stopIntercept.bind(this),
-
-			get store() { return store; },
-			get fragmentPath() { return path; },
-			get fragmentId() { return id; }
-
-		};
-
-		// Helper
-		let normalize = _path => {
-			if (_path.length > 0) return path + (_path[0] == "." ? "" : ".") + _path;
-			else return path;
-		};
-
-		// Dissolver
-		let dissolve = function() {
-
-			// Check
-			if (!this.fragments.hasOwnProperty(id)) return false;
-
-			// Dissolution callback
-			if (typeof onDissolve == "function") onDissolve(fragment);
-
-			// Stop observers and interceptors installed through this fragment
-			internal.observers.forEach(id => this.stopObserve(id));
-			internal.interceptors.forEach(id => this.stopIntercept(id));
-
-			// Delete fragment methods
-			delete fragment.catalyst;
-			delete fragment.stopObserve;
-			delete fragment.stopIntercept;
-
-			delete fragment.parent;
-			delete fragment.parse;
-			delete fragment.isFragment;
-			delete fragment.fragment;
-			delete fragment.dissolve;
-			delete fragment.augment;
-			delete fragment.observe;
-			delete fragment.refresh;
-			delete fragment.intercept;
-
-			// Uninstall the fragment
-			delete this.fragmented[path][id];
-			delete this.fragments[id];
-
-			// Delete fragment properties
-			internal = undefined;
-			store = undefined;
-			path = undefined;
-			id = undefined;
-			onDissolve = undefined;
-
-			// All done
-			return true;
-
-		};
-
-		// Prep methods that use relative paths
-		let observe = function(pathOrObject, fn, children = false, deep = false, init = false) {
-			if (typeof pathOrObject == "undefined") internal.observers.push(this.observe(path, fn, children, deep, init, fragment));
-			else if (typeof pathOrObject == "object") internal.observers.push(this.observe(pathOrObject, fn, children, deep, init, fragment));
-			else if (typeof pathOrObject == "string") internal.observers.push(this.observe(normalize(pathOrObject), fn, children, deep, init, fragment));
-			else throw new Error("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
-
-			return internal.observers[internal.observers.length - 1];
-		};
-
-		let refresh = function(pathOrObject) {
-			if (typeof pathOrObject == "undefined") return this.refresh(path);
-			else if (typeof pathOrObject == "object") return this.refresh(pathOrObject);
-			else if (typeof pathOrObject == "string") return this.refresh(normalize(pathOrObject));
-			else throw new Error("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
-		};
-
-		let intercept = function(pathOrObject, fn, children = false, deep = false) {
-			if (typeof pathOrObject == "undefined") internal.interceptors.push(this.intercept(path, fn, children, deep, fragment));
-			else if (typeof pathOrObject == "object") internal.interceptors.push(this.intercept(pathOrObject, fn, children, deep, fragment));
-			else if (typeof pathOrObject == "string") internal.interceptors.push(this.intercept(normalize(pathOrObject), fn, children, deep, fragment));
-			else throw new Error("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
-
-			return internal.interceptors[internal.interceptors.length - 1];
-		};
-
-		let isFragment = function(pathOrObject) {
-			if (typeof pathOrObject == "undefined") return this.isFragment(path);
-			else if (typeof pathOrObject == "object") return this.isFragment(pathOrObject);
-			else if (typeof pathOrObject == "string") return this.isFragment(normalize(pathOrObject));
-			else throw new Error("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
-		};
-
-		let parent = function(pathOrObject) {
-			if (typeof pathOrObject == "undefined") return this.parent(path);
-			else if (typeof pathOrObject == "object") return this.parent(pathOrObject);
-			else if (typeof pathOrObject == "string") return this.parent(normalize(pathOrObject));
-			else throw new Error("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
-		};
-
-		let parse = function(_path) { return this.parse(normalize(_path)); };
-
-		let fragmentFn = function(pathOrObject, _onDissolve) {
-			if (typeof pathOrObject == "undefined") return this.fragment(path, _onDissolve);
-			else if (typeof pathOrObject == "object") return this.fragment(pathOrObject, _onDissolve);
-			else if (typeof pathOrObject == "string") return this.fragment(normalize(pathOrObject), _onDissolve);
-			else throw new Error("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
-		};
-
-		let augment = function (pathOrObject) {
-			if (typeof pathOrObject == "undefined") return this.augment(path);
-			else if (typeof pathOrObject == "object") return this.augment(pathOrObject);
-			else if (typeof pathOrObject == "string") return this.augment(normalize(pathOrObject));
-			else throw new Error("Expected string, object or undefined, got" + (typeof pathOrObject) + ".");
-		}
-
-		let stopObserve = function (id) {
-			if (!internal.observers[id]) return false;
-			else return this.stopObserve(id);
-		};
-
-		let stopIntercept = function (id) {
-			if (!internal.interceptors[id]) return false;
-			else return this.stopIntercept(id);
-		};
-
-		// Assign the methods that use relative paths
-		fragment.isFragment = this.metaProxify(isFragment, this);
-		fragment.parent = parent.bind(this);
-		fragment.parse = parse.bind(this);
-		fragment.fragment = this.metaProxify(fragmentFn, this);
-		fragment.dissolve = dissolve.bind(this);
-		fragment.augment = this.metaProxify(augment, this);
-		fragment.observe = this.metaProxify(observe, this);
-		fragment.refresh = this.metaProxify(refresh, this);
-		fragment.intercept = this.metaProxify(intercept, this);
-		fragment.stopIntercept = stopIntercept.bind(this);
-		fragment.stopObserve = stopObserve.bind(this);
-
-		// Install the fragment
-		this.fragments[id] = fragment;
-		if (!this.fragmented[path]) this.fragmented[path] = {};
-		this.fragmented[path][id] = true;
-
-		// All done
-		return fragment;
-
-	}
-
-	/**
-	* Takes a part of the store and dissolves all it's fragments, unfreezing the references. Also automatically called when necessary upon undo/redo.
-	* @param {Object|string} pathOrObject - An object reference or a string path that represents any object/array part of the store.
-	*/
-	augment(pathOrObject) {
-
-		// Prep path
-		let path;
-		if (typeof pathOrObject == "object") path = this.path(pathOrObject);
-		else if (typeof pathOrObject == "string") path = pathOrObject;
-		else throw new Error("Expected string or object, got " + (typeof pathOrObject) + ".");
-
-		// Sanity
-		if (typeof path != "string") return false;
-		if (path.length == 0) return false;
-
-		// Is this path fragmented ?
-		if (typeof this.fragmented[path] != "object") return false;
-
-		// Do we have a positive number of fragments ?
-		let ids = Object.keys(this.fragmented[path]);
-		if (ids.length == 0) return false;
-
-		// Dissolve each fragment!
-		ids.forEach(id => this.fragments[id].dissolve());
-
-		// All done - calling dissolve will take care of removing the keys from fragments and fragmented object
-		return true;
-
-	}
-
-	// ---------------------------
 	// PROXY METHODS
 	// ---------------------------
-
-	/**
-	* Parses a nested property path string, and returns the part of the store that it represents.
-	* @param {string} path - The path containing the properties, separated by the accessor character.
-	* @returns {*} The part of the store represented by the path.
-	*/
-	parse(path) {
-
-		// Designate ?
-		if (typeof path == "function") path = path();
-
-		// Sanitize propertypath
-		if (!Array.isArray(path)) throw new Error("Expected array, got " + (typeof path) + ".");
-
-		// Get the final value, if can..
-		return path.reduce((obj, prop) => {
-			if (typeof obj == "undefined") return obj;
-			if (prop.length == 0) return obj;
-			return obj[prop];
-		}, this.store);
-
-	}
 
 	/**
 	* Takes a part of the store and returns the path of the object relative to the base store.
@@ -548,22 +277,6 @@ class Catalyst {
 		return resolved;
 	}
 
-	// TODO: use resolveContext and decorators to create an alternative to metaProxify
-	metaProxify(targetFn, self) {
-
-		let adapterFn = function () {
-			return targetFn.apply(self, [this.path, ...arguments]);
-		};
-
-		let getter = function (target, prop, proxy) {
-			let env = { path: this.path + self.accessor + prop };
-			return new Proxy(adapterFn.bind(env), { get: getter.bind(env) });
-		};
-
-		return new Proxy(targetFn.bind(self), { get: getter.bind({path: ""}) });
-
-	}
-
 	proxify(target, self, path) {
 
 		// Define context to be bound to.
@@ -603,50 +316,27 @@ class Catalyst {
 			let _isArr = Array.isArray(_value);
 			let _isOldArr = Array.isArray(_oldValue);
 
-			// Fragmentation check
-			// TODO: fix this!
-			let isFragment = false;
-			// TODO: is fragment should be retreivable from proxy context as object must exist to be a fragment!
-			/*if (_isOldObj) {
-				if (typeof this.fragmented[_path] == "object") {
-					if (Object.keys(this.fragmented[_path]).length > 0) isFragment = true;
-				}
-			}*/
-
-			// Preserve ref check
-			let preserveRef = this.preserveReferences || isFragment;
-
-			// Preserve fragments ?
-			/*if (isFragment && (!_isObj || (_isObj && (_isArr != _isOldArr)))) {
-				if (this.preserveFragments) return _oldValue;
-				else this.augment(_path);
-			}*/
-
 			// Prep Root - either the underlying target of object oldVal, or a new object if oldVal wasnt an object!
 			let root;
-			let preserve = _root => preserveRef ? this.resolve(_oldValue) : _root;
-
-			if (_isOldArr && _isArr) root = preserve([]); 			// a->a
-			else if (_isOldArr && _isObj) root = {}; 				// a->o
-			else if (_isObj && _isArr) root = []; 					// o->a
-			else if (_isOldObj && _isObj) root = preserve({}); 		// o->o
-			else if (_isOldArr) root = preserve([]);				// a->v
-			else if (_isArr) root = [];								// v->a
-			else if (_isOldObj) root = preserve({}); 				// o->v
-			else if (_isObj) root = {}; 							// v->o
+			if (_isOldArr && _isArr) root = this.resolve(_oldValue); 			// a->a
+			else if (_isOldArr && _isObj) root = {}; 							// a->o
+			else if (_isObj && _isArr) root = []; 								// o->a
+			else if (_isOldObj && _isObj) root = this.resolve(_oldValue); 		// o->o
+			else if (_isOldArr) root = this.resolve(_oldValue);					// a->v
+			else if (_isArr) root = [];											// v->a
+			else if (_isOldObj) root = this.resolve(_oldValue); 				// o->v
+			else if (_isObj) root = {}; 										// v->o
 
 			let isRootArr = Array.isArray(root);
 
 			// Prep deletion optimization - defers/avoids actually deleting the keys until until/unless necessary
+			// TODO: easy diffing??? - count change in number of misc.changes variable
 			let deferDeletes = _isOldObj && !_isObj;
 			let deletes = [];
 
 			let deferDelete = key => {
-				if (preserveRef) {
-					if (!deferDeletes) delete root[key];
-					else deletes.push(key);
-				}
-				misc.changes ++;
+				if (!deferDeletes) delete root[key];
+				else deletes.push(key);
 			};
 
 			let executeDeletes = () => {
@@ -654,16 +344,6 @@ class Catalyst {
 				else deferDeletes = false;
 				deletes.forEach(key => delete root[key]);
 				deletes = [];
-			};
-
-			// Diff helper
-			// TODO: uses double equals instead of triple equals - add test case for objects deep change!
-			let diff = (n, o, r, k) => {
-				if (n === o) {
-					if (!preserveRef) r[k] = o;
-					return false;
-				}
-				return true;
 			};
 
 			// Define object/array key processor
@@ -675,7 +355,7 @@ class Catalyst {
 				let isOldValObj = typeof oldVal == "object";
 
 				// Diff
-				if (!diff(newVal, oldVal, root, key)) return;
+				if (newVal === oldVal) return;
 
 				// Prep path - optionally optimize by retreiving from context if oldValue is an object.
 				let __path;
@@ -691,14 +371,10 @@ class Catalyst {
 				if (iBranch) _iBranch = iBranch.children[key];
 
 				// Intercept!
-				if (_iBranch) {
-					if (_iBranch.meta) {
-						if (_iBranch.meta.top.size > 0) {
-							let iResult = this.notifyInterceptors(__path, newVal, oldVal, _iBranch, false);
-							newVal = iResult.value;
-							if (!diff(newVal, oldVal, root, key)) return;
-						}
-					}
+				if (_iBranch && _iBranch.meta && _iBranch.meta.top.size > 0) {
+					let iResult = this.notifyInterceptors(__path, newVal, oldVal, _iBranch, false);
+					newVal = iResult.value;
+					if (newVal === oldVal) return;
 				}
 
 				// Diff exists
@@ -781,21 +457,21 @@ class Catalyst {
 			// Helper - Disconnects old object so that any ops on it do not trigger side effects !
 			let disconnect = () => {
 				let context = this.resolve(_oldValue, true);
-				context.passthrough = true;
+				context.isDisconnected = true;
 			};
 
 			// Helper - proxifies root if oldValue was not an object (root is a new object)
 			let proxifyOldValue = () => {
 
 				// Fix root array length - trim empty items from the end of the array !!!
-				if (isRootArr && _isArr && _isOldArr && preserveRef) {
+				if (isRootArr && _isArr && _isOldArr) {
 					let h = 0;
 					root.forEach((_,i) => h = (i > h) ? i : h);
 					root.length = h + 1;
 				}
 
 				// Return old or new !
-				if (_isOldObj && (_isOldArr == _isArr) && preserveRef) return _oldValue;
+				if (_isOldObj && (_isOldArr == _isArr)) return _oldValue;
 				else {
 					if (_isOldObj) disconnect();
 					return this.proxify(root, this, _path);
@@ -821,11 +497,10 @@ class Catalyst {
 
 	handleSet(target, prop, value) {
 
-		// Check if this is an isolated non-state disconnected reference OR if we are bypassing and setting the props direct
-		if (this.passthrough || this.self.isBypassed) {
+		// Check if this is an isolated non-state disconnected reference
+		if (this.isDisconnected) {
 			if (typeof value === 'undefined') delete target[prop];
 			else target[prop] = value;
-
 			return true;
 		}
 
@@ -852,11 +527,10 @@ class Catalyst {
 
 		// Retreive observer & interceptor branch
 		let oBranch = self.getMetaBranch(path, self.observerTree, true),
-			oFlag = oBranch.pathLength == path.length,
-			iResult = {};
+			oFlag = oBranch.pathLength == path.length;
 
 		// Fire interceptors
-		iResult = self.notifyInterceptors(path, value, oldValue, undefined, true);
+		let iResult = self.notifyInterceptors(path, value, oldValue, undefined, true);
 		value = iResult.value;
 
 		// Check diff again
@@ -913,14 +587,13 @@ class Catalyst {
 
 	/**
 	* Looks for changes to existing or non-existing part of the store.
-	* @param {Object|string} pathOrObject - An object reference or a string path that represents any part of the store.
-	* @param {observeCB} fn - Invoked when the observed part of the store changes. Do NOT update the store here.
-	* @param {boolean} children - If true, looks for changes to nested child properties.
+	* @param {Object|Array|Function} pathOrObject - An object reference or designator that represents any part of the store.
+	* @param {observeCB} fnId - Invoked when the observed part of the store changes. Do NOT update the store here.
+	* @param {boolean} shallow - If true, looks for changes to nested child properties.
 	* @param {boolean} deep - If true, looks for changes to the entire nested object tree. Overrides children to true.
-	* @param {boolean} init - Invokes the callback once immediately after successful registration.
 	* @returns {Object} An ID that can be used to unregister the observer.
 	*/
-	observe(pathObjDs, fnId, shallow = false, deep = false, origin) {
+	observe(pathObjDs, fnId, shallow = false, deep = false) {
 
 		// Prep
 		let paths = [], pre, id;
@@ -929,16 +602,14 @@ class Catalyst {
 		if (typeof fnId != "function") {
 			id = fnId;
 			pre = this.observers[id];
-			origin = pre.origin;
 
 			if (!pre) throw new Error("Cannot add path(s) to pre-installed observer due to invalid ID!");
 		}
 
-		// Else generate ID and set origin
+		// Else generate ID
 		else {
-			this._uCounter = (this._uCounter || 1) + 1;
+			this._uCounter ++;
 			id = this._uCounter;
-			origin = origin || this.catalyst;
 		}
 
 		// Prep path and determine if multiple paths have been given
@@ -963,7 +634,7 @@ class Catalyst {
 		else throw new Error("Expected designator(s), got " + (typeof pathObjDs) + ".");
 
 		// Set the observer
-		if (!pre) this.observers[id] = {paths, fn: fnId, origin, symbolsMap: {}};
+		if (!pre) this.observers[id] = {paths, fn: fnId, symbolsMap: {}};
 		else pre.paths.push(...paths);
 
 		// Add each path to the tree
@@ -1064,7 +735,6 @@ class Catalyst {
 				// Create a detailed object?
 				if (this.detailedObservations) coveredObserver = {
 						fn: observer.fn,
-						origin: observer.origin,
 						paths: new Array(observer.paths.length)
 					};
 				else coveredObserver = observer;
@@ -1146,7 +816,7 @@ class Catalyst {
 
 		// Triger every handler in order
 		observersCovered.forEach((processedObs, obsId) => {
-			if (this.observers[obsId]) processedObs.fn(processedObs.paths, processedObs.origin);
+			if (this.observers[obsId]) processedObs.fn(processedObs.paths);
 		});
 
 		// All done - empty the queue
@@ -1161,19 +831,18 @@ class Catalyst {
 	* Intercepts (or validates) changes to an existing or non-existing part of the store. Similar to a middleware. Supports cascading updates to store.
 	* @param {Object|string} pathOrObject - An object reference or a string path that represents any part of the store.
 	* @param {interceptCB} fn - Invoked when the given part of the store changes. Cascaded updates to other parts of the store are batched as single atomic history record.
-	* @param {boolean} children - If true, intercepts changes to nested child properties.
+	* @param {boolean} shallow - If true, intercepts changes to nested child properties.
 	* @param {boolean} deep - If true, intercepts changes to the entire nested object tree. Overrides children to true.
 	* @returns {Object} An ID that can be used to unregister the interceptor.
 	*/
-	intercept(pathObjDs, fn, shallow = false, deep = false, origin) {
+	intercept(pathObjDs, fn, shallow = false, deep = false) {
 
 		// Prep
 		let path, id;
 
-		// Generate ID and set origin
-		this._uCounter = (this._uCounter || 1) + 1;
+		// Generate ID
+		this._uCounter ++;
 		id = this._uCounter;
-		origin = origin || this.catalyst;
 
 		// Prep path and determine if multiple paths have been given
 		if (typeof pathObjDs == "function") path = pathObjDs();
@@ -1187,7 +856,7 @@ class Catalyst {
 		else throw new Error("Expected designator(s), got " + (typeof pathObjDs) + ".");
 
 		// Set the observer
-		this.interceptors[id] = { path, fn, origin };
+		this.interceptors[id] = { path, fn };
 
 		// Create tree branch
 		let branch = this.ensureMetaBranch(path, this.interceptorTree, () => {
@@ -1263,8 +932,7 @@ class Catalyst {
 
 			newVal = interceptor.fn(
 				path,
-				newVal,
-				interceptor.origin
+				newVal
 			);
 
 			if (newVal === oldVal && requireDiff) escapeFlag = true;
@@ -1332,24 +1000,18 @@ class Catalyst {
 	Catalyst
 };*/
 
- /**
-  * @callback dissolveCB
-  */
-
   /**
   * @callback observeCB
-  * @param {string} path - The path of the changed part of the store, relative to the origin.
+  * @param {string} path - The path of the changed part of the store.
   * @param {*} oldValue - Value of the part of the store before the change.
-  * @param {Object} origin - Catalyst or the fragment via which the observer callback was registered.
   * @param {string} opPath - The path to the top-level part of the store, relative to the base store, which was originally changed. Could be different from path for child and deep observers.
   * @param {*} opOldValue - Value of the top-level part of the store which was originally changed.
   */
 
   /**
   * @callback interceptCB
-  * @param {string} path - The path of the changed part of the store, relative to the origin.
+  * @param {string} path - The path of the changed part of the store.
   * @param {*} newValue - Value of the part of the store before the change.
-  * @param {Object} origin - Catalyst or the fragment via which the observer callback was registered.
   * @param {string} opPath - The path to the top-level part of the store, relative to the base store, which was originally changed. Could be different from path for child and deep observers.
   * @param {*} opOldValue - Value of the top-level part of the store which was originally changed.
   */
