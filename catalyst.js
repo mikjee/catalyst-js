@@ -917,10 +917,14 @@ class Catalyst {
 	}
 
 	// TODO: how to escape interceptor chain? - for example for making a catalyst-readonly plugin (solved) - how to escape without returning oldval???
-	notifyInterceptors(path, newVal, oldVal, branch, dig = true, requireDiff = true) {
+	notifyInterceptors(path, newVal, oldVal, branch, dig = true) {
 
 		// Prep
 		let escapeFlag = false;
+
+		// Next chain creator
+		// TODO: implement this !!!
+		let next = val => val;
 
 		// Helper
 		let notify = (isEnabled, id) => {
@@ -932,10 +936,12 @@ class Catalyst {
 
 			newVal = interceptor.fn(
 				path,
-				newVal
+				newVal,
+				oldVal,
+				next
 			);
 
-			if (newVal === oldVal && requireDiff) escapeFlag = true;
+			if (newVal === oldVal) escapeFlag = true;
 
 		};
 

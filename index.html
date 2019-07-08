@@ -1,18 +1,85 @@
 <html>
 	<head>
 		<script type="text/javascript" src="./catalyst.js"></script>
+		<script type="text/javascript" src="./catalyst-history.js"></script>
 	</head>
 	<body>
 		Catalyst v1 Test
 		<script type="text/javascript">
 
-			let catalyst = new Catalyst(),
-				store = catalyst.store,
-				root = designator;
+			// document.getElementsByTagName('*').length
+			// --------------------------------------------
+
+			/*let behemoth = {};
+			let populate = (obj, widthMap, depth = 2, value = 1, prefix = "abcdefghijklmnopqrstuvwxyz") => {
+				let width = widthMap[widthMap.length - depth];
+				for (var i = 0; i < width; i++) {
+					let prop = prefix + i.toString();
+					obj[prop] = { value };
+					if (depth > 1) populate(obj[prop], widthMap, depth - 1, value, prefix);					
+				}
+			};
+
+			console.log("Constructing behemoth..");
+			performance.mark("creation");
+
+			populate(behemoth, [1, 100, 20, 10], 4, 1);
+
+			performance.measure("creation", "creation");
+			window.perf1 = performance.getEntriesByType("measure")[0].duration.toFixed(2);
+			console.log("Behemoth construction took " + window.perf1 + " ms.");
+			performance.clearMarks();
+			performance.clearMeasures();
 
 			// --------------------------------------------
 
-			store.a = {b:{c:{d:true, e:false}, f:{g: true}, h: true}};
+			console.log("Catalyzing behemoth..");
+			performance.mark("catalyst");
+			
+			let catalyst = new Catalyst(behemoth),
+				store = catalyst.store,
+				root = designator;
+
+			performance.measure("catalyst", "catalyst");
+			window.perf2 = performance.getEntriesByType("measure")[0].duration.toFixed(2);
+			console.log("Behemoth catalyzation took " + window.perf2 + " ms.");
+			performance.clearMarks();
+			performance.clearMeasures();
+			
+			// --------------------------------------------
+
+			console.log("Serializing behemoth..");
+			performance.mark("serialize");
+
+			let frozen = JSON.stringify(store);
+
+			performance.measure("serialize", "serialize");
+			window.perf3 = performance.getEntriesByType("measure")[0].duration.toFixed(2);
+			console.log("Behemoth serialization took " + window.perf3 + " ms.");
+			performance.clearMarks();
+			performance.clearMeasures();
+
+			// --------------------------------------------
+
+			console.log("Re-assigning behemoth..");
+			behemoth = {};
+			populate(behemoth, [1, 100, 10, 20], 4, 2);
+
+			performance.mark("reassign");
+
+			store.abcdefghijklmnopqrstuvwxyz0 = behemoth.abcdefghijklmnopqrstuvwxyz0;
+
+			performance.measure("reassign", "reassign");
+			window.perf4 = performance.getEntriesByType("measure")[0].duration.toFixed(2);
+			console.log("Behemoth re-assignment took " + window.perf4 + " ms.");
+			performance.clearMarks();
+			performance.clearMeasures();*/
+
+			//alert("Measures: \nConstruction: " + window.perf1 + " ms\nCatalyzation: " + window.perf2 + " ms\nSerialization: " + window.perf3 + "ms");
+
+			// --------------------------------------------
+
+			//store.a = {b:{c:{d:true, e:false}, f:{g: true}, h: 0}};
 			
 			/*let obs1 = catalyst.observe(
 				[
@@ -47,17 +114,26 @@
 			//store.a.b.f.g = 3;
 
 			// --------------------------------------------
+			
+			let catalyst = new Catalyst({a: {b: { c: 1}}}),
+			store = catalyst.store,
+			root = designator;
+
+			let historyController = new CatalystHistory(catalyst);
+			let history = historyController.internals.history;
+
+			// --------------------------------------------
 
 			
-			let history = [{forward: [], backward: []}];
-			let parse = path => path.reduce((current, prop) => current[prop], store);
+			//let history = [{forward: [], backward: []}];
+			//let parse = path => path.reduce((current, prop) => current[prop], store);
 			
 			/*store.a = { b: { c: 1 } };
 			let fn = () => store.a.b.c++;*/
 			
 			// Note we are only stringifying - the parsing will be done later at runtime - saving us some time?
 			// TODO: need to batch multiple updates to the same path - use a permanent store structure tree for path??
-			catalyst.intercept(root, (path, value) => {
+			/*catalyst.intercept(root, (path, value) => {
 
 				let old = parse(path);
 				let isOldObj = (typeof old === "object");
@@ -69,7 +145,7 @@
 				if (isObj) val = JSON.stringify(val);					// TODO: This is damn slow!!				
 				history[history.length - 1].forward.push({path, value: val, flag: isObj});*/
 
-				return value;
+				/*return value;
 
 			}, true, true);
 
@@ -77,15 +153,16 @@
 				// TODO: move the logic for recording the forward values here instead of in the itnerceptor? use the paths to parse and record!
 				// TODO: or use a logic of ALL recordings ONLY in the observer (move all stringification to the obs) - logic of intermediate vals
 				history.push({ forward: [], backward: [] });
-			}, true, true);
+			}, true, true);*/
 
 			// --------------------------------------------
 			
 			// Icept + Obs-Enqueue
 			performance.mark("test");
 			for (var i = 0; i < 100000; i++) {
-				store.a.b.c.d = {i};
-				//store.a.b.f.g = {i};
+				//store.a.b.c.d = {i};
+				//store.a.b.f.g = i;
+				store.a.b.c = i;
 			}
 			performance.measure("test", "test");
 
