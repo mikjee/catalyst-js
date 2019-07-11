@@ -1,19 +1,19 @@
-class CatalystFragment {
+class Fragment {
 
-	// TODO: add ability to create a fragment from another fragment as well!
+	// TODO: add ability to create a fragment from another fragment as well - WARNING! Chaining path translations can slow things down!!
 	constructor(catalyst, pathsMap, dissolvePath, onDissolve) {
 
 		// Prep
-		this.catalyst = catalyst;
-		this.isDissolved = false;
-		this.dissolvePath = (typeof dissolvePath == "function") ? dissolvePath() : dissolvePath;
-		this.onDissolve = onDissolve || (() => false);
+		this.catalyst = catalyst;					// PRIVATE:
+		this.isDissolved = false;					// PUBLIC:
+		this.dissolvePath = (typeof dissolvePath == "function") ? dissolvePath() : dissolvePath; // PRIVATE:
+		this.onDissolve = onDissolve || (() => false);	// PRIVATE:
 
-		this.store = {};
-		this.pathsMap = {};
+		this.store = {};							// PUBLIC:
+		this.pathsMap = {};							// PUBLIC:
 		
-		this.observers = {};
-		this.interceptors = {};
+		this.observers = {};						// PRIVATE:
+		this.interceptors = {};						// PRIVATE:
 
 		this.qualifiedPaths = [];					// PRIVATE:
 		this.qPathIndexToPropsMap = [];				// PRIVATE:
@@ -35,12 +35,12 @@ class CatalystFragment {
 			// Add to list
 			this.pathsMap[prop] = path;
 
-			// Add value store
-			this.store[prop] = this.catalyst.path(path);
+			// Add value to store
+			this.store[prop] = this.catalyst.parse(path);
 
 			// Add to internal map
-			this.qualifiedPaths.push[path];
-			this.qPathIndexToPropsMap.push[prop];
+			this.qualifiedPaths.push(path);
+			this.qPathIndexToPropsMap.push(prop);
 
 			// Default the dissolvePath to the first mapped path encountered, if it wasnt given!
 			if (!this.dissolvePath) this.dissolvePath = path;
@@ -54,27 +54,23 @@ class CatalystFragment {
 		this.dissolveWatcherId = this.catalyst.observe(this.dissolvePath, this.dissolveWatcher.bind(this));
 
 		// Proxify the store instance to make sure the top level props cant be changed!
-		this.proxifiedStore = new Proxy(this.store, { set: () => false });
+		this.proxifiedStore = new Proxy(this.store, { set: () => console.error("Cannot change value of top level prop of a fragment!") });
 
 		// All done!
-		// TODO: finish this!
 		let internals = this;
 		this.fragment = {
 
 			internals,
 
 			get store() { return internals.proxifiedStore; },
-
-			get pathsMap() { return internals.pathsMap; },
-			get dissolvePath() { return internals.dissolvePath; },
 			get isDissolved() { return internals.isDissolved; },
 
-			addPath: pathsMap => false,				// TODO: finish this!
-			removePath: prop => false,				// TODO: finish this!
+			addPath: pathsMap => console.error("Not implemented!"),			// TODO: implement this!
+			removePath: prop => console.error("Not implemented!"),			// TODO: implement this!
 
-			path: this.catalyst.path,
-			parent: () => this.catalyst.parent,
-			parse: () => false,						// TODO: implement this!
+			path: obj => this.relativePath(this.catalyst.path(obj)),		// TODO: Implement relativePath method 
+			parent: this.catalyst.parent,
+			parse: path => this.catalyst.parse(this.absolutePath(path)),
 
 			observe: this.observe.bind(this),
 			stopObserve: this.stopObserve.bind(this),
@@ -89,7 +85,7 @@ class CatalystFragment {
 
 	}
 
-	// TODO: implement root observation - which will observe all mapped paths!
+	// TODO: FLAW - cant observe or intercept anything outside of a fragment through the fragment - due to path translation!
 	observe(pathObjDs, fnId, shallow = false, deep = false) {
 
 		// Qualify path(s)
@@ -97,7 +93,7 @@ class CatalystFragment {
 		if (typeof pathObjDs == "function") paths.push(pathObjDs());
 		else if (Array.isArray(pathObjDs)) {
 
-			if (pathObjDs.length == 0) paths.push([]);
+			if (pathObjDs.length == 0) paths = this.qualifiedPaths;	// Obs all mapped paths!
 			else if (typeof pathObjDs[0] == "string") paths.push([pathObjDs]);
 			else pathObjDs.forEach(path => {
 				let type = typeof path;
@@ -116,14 +112,14 @@ class CatalystFragment {
 		let qPaths = paths
 			.filter(path => {
 				if (Array.isArray(path) || typeof path === "string") {
-					if (path.length === 0) throw new Error("Cannot observe root of a fragment!");
-					else if (!this.pathsMap[path[0]]) return false;
+					if (path.length === 0) throw new Error("Cannot observe root of a fragment along with it's children with the same observer!");
+					else if (!this.pathsMap[path[0]]) throw new Error("Fragment observation requires fragment root or valid fragment path(s)!");
 					else return true;
 				}
 				else return true;
 			})
 			.map(path => {
-				if (Array.isArray(path)) this.absolutePath(path);
+				if (Array.isArray(path)) return this.absolutePath(path);
 				else return path;
 			});
 
@@ -149,27 +145,36 @@ class CatalystFragment {
 		return this.catalyst.stopObserve(id);
 	}
 
-	// TODO: not properly implemented was sleepy!!!!!
 	intercept(pathObjDs, fn, shallow = false, deep = false) {
 
-		// Prep path and determine if multiple paths have been given
+		// Prep path
 		let path;
-		if (typeof pathObjDs == "function") path = pathObjDs();
+		if (typeof pathObjDs == "function") {
+			path = pathObjDs();
+			if (path.length == 0) throw new Error("Cannot intercept root of a fragment!");
+		}
 		else if (Array.isArray(pathObjDs)) {
 			if (pathObjDs.length == 0) throw new Error("Cannot intercept root of a fragment!");
-			else path = pathObjDs;
+			else path = this.absolutePath(pathObjDs);
 		}
 		else if (typeof pathObjDs == "object") path = pathObjDs;
+		else if (typeof pathObjDs == "string") {
+			if (pathObjDs.length == 0) throw new Error("Cannot intercept root of a fragment!");
+			else path = this.absolutePath([pathObjDs]);
+		}
 		else throw new Error("Expected designator(s), got " + (typeof pathObjDs) + ".");
 
-		// Find absolute
-		let qPath = this.absolutePath(path);
+		// See if absolute is valid
+		if (!path) throw new Error("Fragment interception requires a valid fragment path!");
 
-		// Install the observer
-		let id = this.catalyst.intercept(qPath, fn, shallow, deep);
+		// Add adapter function to translate the paths to relative!
+		// TODO: implement this??
+
+		// Install the interceptor
+		let id = this.catalyst.intercept(path, fn, shallow, deep);
 
 		// Add to list
-		this.observers[id] = true;
+		this.interceptors[id] = true;
 
 		// All done
 		return id;
@@ -182,9 +187,6 @@ class CatalystFragment {
 	}
 
 	dissolve() {
-
-		// Check!
-		if (this.isDissolved) return false;
 
 		// Call onDissolve and cancel dissolution if it returns true
 		if (this.onDissolve(this.fragment) === true) return false;
@@ -202,6 +204,7 @@ class CatalystFragment {
 
 		// Dissolve
 		this.isDissolved = true;
+		this.fragment = { isDissolved: true };
 
 		// Done
 		return true;
@@ -233,25 +236,23 @@ class CatalystFragment {
 
 	}
 
-	// TODO: implement this!
+	// TODO: implement this - will need to maintain a tree??
 	relativePath(path) {
-
+		console.error("Not Implemented!");
 	}
 
 	absolutePath(path) {
 
-		// Qualify
-		let type = typeof path;
-		if (type === "function") path = path();
-		else if (type === "string") path = [path];
-
 		// Check invalid translations
 		if (path.length === 0) throw new Error("Invalid path - cannot translate root of a fragment!");
-		else if (!this.pathsMap[path[0]]) throw new Error("Invalid path - '" + this.pathsMap[path] + "' is a not a part of the fragment!");
+
+		// Obtain mappedPath
+		let mappedPath = this.pathsMap[path[0]];
 
 		// Translate
-		return [
-			...this.pathsMap[path[0]],
+		if (!mappedPath) return false;
+		else return [
+			...mappedPath,
 			...path.slice(1)
 		];		
 

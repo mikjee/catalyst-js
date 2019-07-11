@@ -2,6 +2,7 @@
 	<head>
 		<script type="text/javascript" src="./catalyst.js"></script>
 		<script type="text/javascript" src="./catalyst-history.js"></script>
+		<script type="text/javascript" src="./catalyst-fragment.js"></script>
 	</head>
 	<body>
 		Catalyst v1 Test
@@ -114,51 +115,43 @@
 			//store.a.b.f.g = 3;
 
 			// --------------------------------------------
+
+			let catalyst = new Catalyst({
+				a: { b: { c: { d: 1}}},
+				e: { f: { g: { h: 2}}},
+				i: 4,
+				j: { k: 3 }
+			});
+
+			let store = catalyst.store;
+			let root = designator;
+
+			let fragment = new Fragment(
+				catalyst,
+				{
+					first: root.a,
+					second: root.e.f,
+					third: root.i
+				},
+				root.j,
+				() => console.log("Dissolving..")
+			);
+
+			let history = new History(catalyst, root.a);
+
+			// --------------------------------------------
 			
-			let catalyst = new Catalyst({a: {b: { c: 1}}}),
+			/*let catalyst = new Catalyst({a: {b: { c: 1}}}),
 			store = catalyst.store,
 			root = designator;
 
-			let historyController = new CatalystHistory(catalyst);
-			let history = historyController.internals.history;
-
-			// --------------------------------------------
-
-			
-			//let history = [{forward: [], backward: []}];
-			//let parse = path => path.reduce((current, prop) => current[prop], store);
-			
-			/*store.a = { b: { c: 1 } };
-			let fn = () => store.a.b.c++;*/
-			
-			// Note we are only stringifying - the parsing will be done later at runtime - saving us some time?
-			// TODO: need to batch multiple updates to the same path - use a permanent store structure tree for path??
-			/*catalyst.intercept(root, (path, value) => {
-
-				let old = parse(path);
-				let isOldObj = (typeof old === "object");
-				if (isOldObj) old = JSON.stringify(old);				// TODO: This is damn slow!!
-				history[history.length - 1].backward.push({ path, value: old, flag: isOldObj });
-
-				/*let val = value;
-				let isObj = (typeof val === "object");
-				if (isObj) val = JSON.stringify(val);					// TODO: This is damn slow!!				
-				history[history.length - 1].forward.push({path, value: val, flag: isObj});*/
-
-				/*return value;
-
-			}, true, true);
-
-			catalyst.observe(root, () => {
-				// TODO: move the logic for recording the forward values here instead of in the itnerceptor? use the paths to parse and record!
-				// TODO: or use a logic of ALL recordings ONLY in the observer (move all stringification to the obs) - logic of intermediate vals
-				history.push({ forward: [], backward: [] });
-			}, true, true);*/
+			let historyController = new History(catalyst);
+			let history = historyController.internals.history;*/
 
 			// --------------------------------------------
 			
 			// Icept + Obs-Enqueue
-			performance.mark("test");
+			/*performance.mark("test");
 			for (var i = 0; i < 100000; i++) {
 				//store.a.b.c.d = {i};
 				//store.a.b.f.g = i;
@@ -168,7 +161,7 @@
 
 			console.log(performance.getEntriesByType("measure")[0].duration);
 			performance.clearMarks();
-			performance.clearMeasures();
+			performance.clearMeasures();*/
 
 			// --------------------------------------------
 

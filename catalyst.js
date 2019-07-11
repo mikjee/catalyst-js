@@ -168,7 +168,7 @@ class Catalyst {
 		let current = metaRoot;
 
 		path.forEach((prop,i) => {
-			if (!current.children[prop]) current.children[prop] = {	children: {}, parent: current, symbol: Symbol(prop), pathLength: i };
+			if (!current.children[prop]) current.children[prop] = {	children: {}, parent: current, symbol: Symbol(prop), pathLength: i+1 };
 			current = current.children[prop];
 		});
 
@@ -216,7 +216,7 @@ class Catalyst {
 		// Traverse upwards while deleting empty branches as long as possible
 		while (current.parent != current) {
 
-			if (flagger(current, branchPath[branchPath.length - 1])) {
+			if (!current.meta || flagger(current, branchPath[branchPath.length - 1])) {
 				current = current.parent;
 				delete current.children[branchPath.pop()];
 			}
@@ -267,6 +267,7 @@ class Catalyst {
 	* @param {Object|string} pathOrObject - An object reference or a string path that represents any part of the store.
 	* @returns {Object} An object reference to the parent of the given path or object.
 	*/
+	// TODO: embed a ref to the parent in the proxy context for faster resolution?
 	parent(pathOrObject) {
 
 		// Designate?
@@ -696,7 +697,7 @@ class Catalyst {
 
 			// Delete leafs
 			obs.paths.forEach(path => {
-				let branch = getMetaBranch(path, this.observerTree);
+				let branch = this.getMetaBranch(path, this.observerTree);
 
 				branch.meta.top.delete(id);
 				branch.meta.shallow.delete(id);
@@ -907,7 +908,7 @@ class Catalyst {
 			let interceptor = this.interceptors[id];
 
 			// Delete leaf
-			let branch = getMetaBranch(interceptor.path, this.interceptorTree);
+			let branch = this.getMetaBranch(interceptor.path, this.interceptorTree);
 
 			branch.meta.top.delete(id);
 			branch.meta.shallow.delete(id);

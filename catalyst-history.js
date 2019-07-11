@@ -4,7 +4,8 @@
 // TODO: add hooks for requesting backward or forward logs
 // TODO: current historyindex position can be so far back that all the forward logs may not be present - same as all backward logs will not be present - add memory log limit of 100
 // TODO: if past history is present, at least 1 must be loaded for the json distance logic to work properly!
-class CatalystHistory {
+// TODO: add functionality to record multiple paths instead of just one!
+class History {
 
 	constructor(catalyst, path, history, historyIndex = 0) {
 
@@ -21,8 +22,8 @@ class CatalystHistory {
 		this.endLogTmr = false;
 
 		// Ready our first recording
-		// TODO: Dont use this function for readying the first entry, do it separately - note down distance from prev json log!
-		this.endLog();
+		// TODO: Dont use this function for readying the first entry, do it separately - also note down distance from prev json log!
+		this.history.push({ un: [], t: this.timestamp() });
 
 		// Install interceptor & observer on the path!
 		this.interceptorId = catalyst.intercept(this.path, this.interceptor.bind(this), true, true);
@@ -79,6 +80,7 @@ class CatalystHistory {
 	}
 
 	// NOTE: This is a dumb function!
+	// TODO: MAJOR FLAW - Because of path discrepancies in fragment - relative transform in observe but not in callback, providing a fragment for the catalyst does not work!
 	logChange(path, value, isRedo = false) {
 
 		// Prep
@@ -100,7 +102,7 @@ class CatalystHistory {
 		// Record in the given path
 		current.logged = true;
 		let oFlag = typeof value == "object";
-		this.history[this.historyIndex][isRedo ? "re" : "un"].push({p: path, v: oFlag ? JSON.stringify(value) : value, o: oFlag});
+		this.history[this.history.length - (this.historyIndex + 1)][isRedo ? "re" : "un"].push({p: path, v: oFlag ? JSON.stringify(value) : value, o: oFlag});
 
 	}
 
