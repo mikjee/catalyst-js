@@ -108,7 +108,7 @@ class Catalyst {
 		this.observers = {};												// PRIVATE:
 		this.isObservationPromised = false;									// PRIVATE:
 		this.observations = [];												// PRIVATE:
-		this.detailedObservations = false;									// PUBLIC: cannot be changed once initialized!
+		this.detailedObservations = true;									// PUBLIC: cannot be changed once initialized!
 
 		// Interceptor prep
 		this.interceptorTree = this.createMetaRoot();						// PRIVATE:
@@ -138,6 +138,7 @@ class Catalyst {
 
 			path: this.path.bind(this),
 			parent: this.parent.bind(this),
+			parse: this.parse.bind(this),
 
 			observe: this.observe.bind(this),
 			stopObserve: this.stopObserve.bind(this),
@@ -228,6 +229,24 @@ class Catalyst {
 	// ---------------------------
 	// PROXY METHODS
 	// ---------------------------
+
+	parse(path) {
+
+		// Qualify the path
+		if (typeof path == "function") path = path();
+
+		// Checks
+		if (path === "" || path.length === 0) return this.store;
+		
+		// Traverse
+		let current = this.store;
+		if (path.some(prop => {
+			if (current === undefined) return true;
+			else current = current[prop];
+		})) return undefined;
+		else return current;
+
+	}
 
 	/**
 	* Takes a part of the store and returns the path of the object relative to the base store.
@@ -622,14 +641,12 @@ class Catalyst {
 				let type = typeof path;
 
 				if (type == "function") paths.push(path());
-				else if (Array.isArray(path)) paths.push(path); 										// Assuming it is an array of array of strings
+				else if (Array.isArray(path)) paths.push(path); // Assuming it is an array of array of strings
 				else if (type == "object") paths.push(this.path(path));
 				else throw new Error("Expected designator(s), got some weird array.");
 			});
 
 		}
-
-		// TODO: there is going to be an issue with object ? the path extracted from the object context will be the full path - can it interfere with fragment?
 		else if (typeof pathObjDs == "object") paths.push(this.path(pathObjDs));
 		else throw new Error("Expected designator(s), got " + (typeof pathObjDs) + ".");
 
@@ -722,7 +739,6 @@ class Catalyst {
 		let observersCovered = new Map();
 
 		// Observer processor
-		// TODO: path enqueued here should be fragment path ???
 		let processObservation = (observerId, observation, branch) => {
 
 			// Prep
@@ -850,8 +866,6 @@ class Catalyst {
 			if (pathObjDs.length == 0) path = [];
 			else path = pathObjDs;
 		}
-
-		// TODO: there is going to be an issue with object ? the path extracted from the object context will be the full path - can it interfere with fragment?
 		else if (typeof pathObjDs == "object") path = this.path(pathObjDs);
 		else throw new Error("Expected designator(s), got " + (typeof pathObjDs) + ".");
 
