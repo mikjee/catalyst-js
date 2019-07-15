@@ -1016,10 +1016,10 @@ class Catalyst {
 
 };
 
-/*export {
+export {
 	designator,
 	Catalyst
-};*/
+};
 
   /**
   * @callback observeCB

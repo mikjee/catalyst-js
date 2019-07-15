@@ -1,4 +1,4 @@
-class Fragment {
+export default class Fragment {
 
 	// TODO: add ability to create a fragment from another fragment as well - WARNING! Chaining path translations can slow things down!!
 	constructor(catalyst, pathsMap, dissolvePath, onDissolve) {
@@ -17,6 +17,7 @@ class Fragment {
 
 		this.qualifiedPaths = [];					// PRIVATE:
 		this.qPathIndexToPropsMap = [];				// PRIVATE:
+		this.qualifiedTree = {};					// PRIVATE:
 
 		// Qualify the paths and install observers / interceptors!
 		for (var prop in pathsMap) {
@@ -31,6 +32,22 @@ class Fragment {
 			// Qualify designator
 			if (type == "function") path = path();
 			else if (type == "object") path = this.catalyst.path(path);
+
+			// Try to add to tree - used for relative path conversion!
+			let current = this.qualifiedTree;
+			if (path.some((pathProp, i) => {
+				if (i == path.length - 1) return false;
+				else if (!current[pathProp]) {
+					current[pathProp] = {};
+					current = current[pathProp];
+				}
+				else {
+					current = current[pathProp];
+					if (typeof current !== 'object') return true;
+					// TODO: if any qualified paths are there further deep into the tree already qualified, they must be deleted as well - finish this!
+				}
+			})) throw new Error("Can't map parent and child paths in the same fragment!");
+			current[path[path.length - 1]] = prop;
 
 			// Add to list
 			this.pathsMap[prop] = path;
@@ -86,7 +103,7 @@ class Fragment {
 	}
 
 	// TODO: FLAW - cant observe or intercept anything outside of a fragment through the fragment - due to path translation!
-	observe(pathObjDs, fnId, shallow = false, deep = false) {
+	observe(pathObjDs, fnId, shallow = false, deep = false, transformPaths = false) {
 
 		// Qualify path(s)
 		let paths = [];
@@ -127,10 +144,12 @@ class Fragment {
 		if (qPaths.length === 0) throw new Error("Observe requires at least 1 valid fragment path!");
 
 		// Add adapter function to translate the paths to relative!
-		// TODO: implement this??
+		let transformedFnId = ((typeof fnId == "function") && transformPaths) ? 
+			(fullPaths, ...args) => fnId(fullPaths.map(p => this.relativePath(p)), ...args) :
+			fnId;
 
 		// Install the observer
-		let id = this.catalyst.observe(qPaths, fnId, shallow, deep);
+		let id = this.catalyst.observe(qPaths, transformedFnId, shallow, deep);
 
 		// Add ONLY! Don't update true or false!
 		if (typeof fnId == "function") this.observers[id] = true;
@@ -155,23 +174,24 @@ class Fragment {
 		}
 		else if (Array.isArray(pathObjDs)) {
 			if (pathObjDs.length == 0) throw new Error("Cannot intercept root of a fragment!");
-			else path = this.absolutePath(pathObjDs);
+			else path = pathObjDs;
 		}
 		else if (typeof pathObjDs == "object") path = pathObjDs;
 		else if (typeof pathObjDs == "string") {
 			if (pathObjDs.length == 0) throw new Error("Cannot intercept root of a fragment!");
-			else path = this.absolutePath([pathObjDs]);
+			else path = [pathObjDs];
 		}
 		else throw new Error("Expected designator(s), got " + (typeof pathObjDs) + ".");
 
-		// See if absolute is valid
+		// Convert to absolute path
+		path = this.absolutePath(path);
 		if (!path) throw new Error("Fragment interception requires a valid fragment path!");
 
 		// Add adapter function to translate the paths to relative!
-		// TODO: implement this??
+		let transformedFn = (fullPath, ...args) => fn(this.relativePath(fullPath), ...args);
 
 		// Install the interceptor
-		let id = this.catalyst.intercept(path, fn, shallow, deep);
+		let id = this.catalyst.intercept(path, transformedFn, shallow, deep);
 
 		// Add to list
 		this.interceptors[id] = true;
@@ -236,9 +256,19 @@ class Fragment {
 
 	}
 
-	// TODO: implement this - will need to maintain a tree??
-	relativePath(path) {
-		console.error("Not Implemented!");
+	relativePath(path) {		
+		let current = this.qualifiedTree,
+			depth = 0;
+
+		path.some(prop => {
+			current = current[prop];
+			depth ++;
+			if (typeof current !== 'object') return true;
+		});
+
+		let transformedPath = path.slice();
+		transformedPath.splice(0, depth, current);
+		return transformedPath;
 	}
 
 	absolutePath(path) {

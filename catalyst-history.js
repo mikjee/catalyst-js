@@ -1,11 +1,12 @@
 
 // TODO: unfinished business - complete this module!! - left for later on!
+// TODO: logic - entire given path will be recorded once every 100 records, to be used when traversing >100 records at a time.
 // TODO: add hooks for logs being created / updated / deleted
 // TODO: add hooks for requesting backward or forward logs
 // TODO: current historyindex position can be so far back that all the forward logs may not be present - same as all backward logs will not be present - add memory log limit of 100
 // TODO: if past history is present, at least 1 must be loaded for the json distance logic to work properly!
 // TODO: add functionality to record multiple paths instead of just one!
-class History {
+export default class History {
 
 	constructor(catalyst, path, history, historyIndex = 0) {
 
@@ -64,7 +65,6 @@ class History {
 		}
 	}
 
-	// NOTE: This is a dumb function!
 	timestamp() {
 
 		let timestamp = Date.now();
@@ -79,8 +79,6 @@ class History {
 
 	}
 
-	// NOTE: This is a dumb function!
-	// TODO: MAJOR FLAW - Because of path discrepancies in fragment - relative transform in observe but not in callback, providing a fragment for the catalyst does not work!
 	logChange(path, value, isRedo = false) {
 
 		// Prep

@@ -1,12 +1,14 @@
 <html>
 	<head>
-		<script type="text/javascript" src="./catalyst.js"></script>
-		<script type="text/javascript" src="./catalyst-history.js"></script>
-		<script type="text/javascript" src="./catalyst-fragment.js"></script>
+		
 	</head>
 	<body>
 		Catalyst v1 Test
-		<script type="text/javascript">
+		<script type="module">
+
+			import {Catalyst, designator as root} from "./catalyst.js";
+			import History from "./catalyst-history.js";
+			import Fragment from "./catalyst-fragment.js";
 
 			// document.getElementsByTagName('*').length
 			// --------------------------------------------
@@ -38,8 +40,7 @@
 			performance.mark("catalyst");
 			
 			let catalyst = new Catalyst(behemoth),
-				store = catalyst.store,
-				root = designator;
+				store = catalyst.store;
 
 			performance.measure("catalyst", "catalyst");
 			window.perf2 = performance.getEntriesByType("measure")[0].duration.toFixed(2);
@@ -124,7 +125,6 @@
 			});
 
 			let store = catalyst.store;
-			let root = designator;
 
 			let fragment = new Fragment(
 				catalyst,
@@ -137,13 +137,17 @@
 				() => console.log("Dissolving..")
 			);
 
-			let history = new History(catalyst, root.a);
+			let history = new History(fragment, root.first);
+
+			window.store = store;
+			window.root = root;
+			window.fragment = fragment;
+			window.catalystHistory = history;
 
 			// --------------------------------------------
 			
 			/*let catalyst = new Catalyst({a: {b: { c: 1}}}),
-			store = catalyst.store,
-			root = designator;
+			store = catalyst.store;
 
 			let historyController = new History(catalyst);
 			let history = historyController.internals.history;*/
@@ -184,57 +188,6 @@
 				}
 
 			}, 1);*/
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 		</script>
 	</body>
